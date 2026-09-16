@@ -1,0 +1,31 @@
+# Build output
+/bin/
+/dist/
+*.test
+*.out
+
+# Coverage and profiling
+coverage.*
+*.prof
+*.pprof
+
+# Local config overrides and secrets
+configs/*.local.yml
+.env
+*.pem
+*.key
+
+# Runtime data (checker history, tailer test logs)
+*.db
+*.sqlite
+*.log
+
+# Go workspace file (local multi-module setups)
+go.work
+go.work.sum
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
