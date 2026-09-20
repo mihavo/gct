@@ -1,0 +1,12 @@
+interval: 10s
+timeout: 2s
+workers: 4
+
+targets:
+  - name: "auth"
+    url: "http://localhost:8081/health"
+    expected_status: 200
+
+  - name: "service1"
+    url: "http://localhost:8082/health"
+    expected_status: 200

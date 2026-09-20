@@ -1,0 +1,6 @@
+sources:
+  - name: "gate"
+    path: "./logs/gate.log"
+
+  - name: "checker"
+    path: "./logs/checker.log"

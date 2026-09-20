@@ -1,0 +1,13 @@
+server:
+  listen_address: 'localhost'
+  port: 8080
+  enable_ssl: true
+
+routes:
+  - name: "auth"
+    prefix: "/auth"
+    location: "localhost:8081/auth"
+
+  - name: "service1"
+    prefix: "/service1"
+    location: "localhost:8082/service1"

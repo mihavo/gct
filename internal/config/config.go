@@ -1,12 +1,21 @@
 package config
 
-import "github.com/mihavo/gct/internal/core"
+import (
+	"os"
 
-type Config struct {
-	Data   map[string]Config
-	Domain core.Domain
-}
+	"github.com/goccy/go-yaml"
+)
 
-func LoadYAML(path string) {
+func LoadYAML[T any](path string) (*T, error) {
+	data, err := os.ReadFile(path)
 
+	if err != nil {
+		return nil, err
+	}
+	var config T
+
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
 }
