@@ -6,8 +6,8 @@ server:
 routes:
   - name: "auth"
     prefix: "/auth"
-    location: "localhost:8081/auth"
+    location: "http://localhost:8081/auth"
 
   - name: "service1"
     prefix: "/service1"
-    location: "localhost:8082/service1"
+    location: "http://localhost:8082/service1"
