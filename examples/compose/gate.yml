@@ -1,0 +1,13 @@
+server:
+  listen_address: "0.0.0.0"
+  port: 8080
+  enable_ssl: false
+
+routes:
+  - name: "auth"
+    prefix: "/auth"
+    location: "http://auth:80"
+
+  - name: "service1"
+    prefix: "/service1"
+    location: "http://service1:80"

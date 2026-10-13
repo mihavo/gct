@@ -1,0 +1,26 @@
+name: gct-demo
+
+services:
+  gate:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      GATE_CONFIG_PATH: /etc/gct/gate.yml
+    volumes:
+      - ./gate.yml:/etc/gct/gate.yml:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth
+      - service1
+
+  auth:
+    image: traefik/whoami
+    environment:
+      WHOAMI_NAME: auth
+
+  service1:
+    image: traefik/whoami
+    environment:
+      WHOAMI_NAME: service1
