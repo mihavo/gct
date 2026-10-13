@@ -13,9 +13,9 @@ import (
 )
 
 type Gate struct {
-	config config.GateConfig
-	server *http.Server
-	routes *RoutingTable
+	Config config.GateConfig
+	Server *http.Server
+	Routes *RoutingTable
 }
 
 type RoutingTable struct {
@@ -42,14 +42,14 @@ func NewGate(ctx context.Context, config config.GateConfig) (*Gate, error) {
 	}
 
 	return &Gate{
-		config: config,
-		server: &server,
-		routes: &routes,
+		Config: config,
+		Server: &server,
+		Routes: &routes,
 	}, nil
 }
 
 func (g *Gate) Lookup(path string) (Route, bool) {
-	for _, route := range g.routes.routes {
+	for _, route := range g.Routes.routes {
 		prefix := route.Prefix
 		if !strings.HasSuffix(prefix, "/") {
 			prefix += "/"

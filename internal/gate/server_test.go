@@ -15,7 +15,7 @@ func TestLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building routing table: %v", err)
 	}
-	g := &Gate{routes: &table}
+	g := &Gate{Routes: &table}
 
 	tests := []struct {
 		name      string
