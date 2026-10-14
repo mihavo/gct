@@ -3,6 +3,7 @@ package gate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -10,11 +11,15 @@ import (
 	"strings"
 
 	"github.com/mihavo/gct/internal/config"
+	appjson "github.com/mihavo/gct/internal/core/json"
 )
 
 type Gate struct {
 	Config config.GateConfig
 	Server *http.Server
+}
+
+type Handler struct {
 	Routes *RoutingTable
 }
 
@@ -33,23 +38,33 @@ func NewGate(ctx context.Context, config config.GateConfig) (*Gate, error) {
 	if len(config.Routes) == 0 {
 		return nil, errors.New("No routes declared")
 	}
-	server := http.Server{
-		Addr: net.JoinHostPort(config.Server.ListenAddress, strconv.Itoa(config.Server.Port)),
-	}
+
 	routes, err := buildRoutingTable(config.Routes)
 	if err != nil {
 		return nil, err
 	}
 
+	handler := NewHanlder(&routes)
+
+	server := http.Server{
+		Addr:    net.JoinHostPort(config.Server.ListenAddress, strconv.Itoa(config.Server.Port)),
+		Handler: handler,
+	}
+
 	return &Gate{
 		Config: config,
 		Server: &server,
-		Routes: &routes,
 	}, nil
 }
 
-func (g *Gate) Lookup(path string) (Route, bool) {
-	for _, route := range g.Routes.routes {
+func NewHanlder(routes *RoutingTable) *Handler {
+	return &Handler{
+		Routes: routes,
+	}
+}
+func (h *Handler) Lookup(path string) (Route, bool) {
+
+	for _, route := range h.Routes.routes {
 		prefix := route.Prefix
 		if !strings.HasSuffix(prefix, "/") {
 			prefix += "/"
@@ -59,4 +74,14 @@ func (g *Gate) Lookup(path string) (Route, bool) {
 		}
 	}
 	return Route{}, false
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path, ok := h.Lookup(r.URL.Path)
+
+	if !ok {
+		appjson.WriteError(w, fmt.Sprintf(ErrPathNotFound.Error(), r.URL.Path), http.StatusNotFound)
+		return
+	}
+	fmt.Println("path is ", path)
 }
