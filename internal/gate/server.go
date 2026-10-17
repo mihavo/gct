@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mihavo/gct/internal/config"
 	appjson "github.com/mihavo/gct/internal/core/json"
@@ -23,6 +24,11 @@ type Gate struct {
 
 type Handler struct {
 	Routes *RoutingTable
+}
+
+type ResponseWriterWithCode struct {
+	code int
+	http.ResponseWriter
 }
 
 type RoutingTable struct {
@@ -82,10 +88,23 @@ func (h *Handler) Lookup(path string) (Route, bool) {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	route, ok := h.Lookup(r.URL.Path)
 
+	rwWrapper := ResponseWriterWithCode{
+		code:           200,
+		ResponseWriter: w,
+	}
+
 	if !ok {
 		appjson.WriteError(w, fmt.Sprintf(ErrPathNotFound.Error(), r.URL.Path), http.StatusNotFound)
+		slog.Info("Invalid path for request", "path", r.URL.Path)
 		return
 	}
-	slog.Debug("received route: ", "route", route)
-	route.Proxy.ServeHTTP(w, r)
+
+	start := time.Now()
+	route.Proxy.ServeHTTP(&rwWrapper, r)
+	slog.Info("Request Details: ", "method", r.Method, "path", r.URL.Path, "route", route.Upstream.String(), "status", rwWrapper.code, "duration:", time.Since(start))
+}
+
+func (rw *ResponseWriterWithCode) WriteHeader(statusCode int) {
+	rw.code = statusCode
+	rw.ResponseWriter.WriteHeader(statusCode)
 }
