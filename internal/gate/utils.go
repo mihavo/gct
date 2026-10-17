@@ -3,10 +3,14 @@ package gate
 import (
 	"cmp"
 	"fmt"
+	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"slices"
+	"strings"
 
 	"github.com/mihavo/gct/internal/config"
+	appjson "github.com/mihavo/gct/internal/core/json"
 )
 
 func buildRoutingTable(configs []config.RoutesConfig) (RoutingTable, error) {
@@ -34,6 +38,7 @@ func buildRoutingTable(configs []config.RoutesConfig) (RoutingTable, error) {
 			Name:     rc.Name,
 			Prefix:   rc.Prefix,
 			Upstream: upstream,
+			Proxy:    buildProxy(rc, upstream),
 		})
 	}
 
@@ -42,4 +47,18 @@ func buildRoutingTable(configs []config.RoutesConfig) (RoutingTable, error) {
 	})
 
 	return table, nil
+}
+
+func buildProxy(config config.RoutesConfig, upstream *url.URL) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			rest := strings.Replace(pr.In.URL.Path, config.Prefix, "", 1)
+			pr.Out.URL.Path = rest
+			pr.SetURL(upstream)
+			pr.Out.Header.Set("X-Forwarded-Prefix", config.Prefix)
+			pr.SetXForwarded()
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			appjson.WriteError(w, "service unavailable", http.StatusBadGateway)
+		}}
 }

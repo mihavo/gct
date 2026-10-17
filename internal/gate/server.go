@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
@@ -31,6 +33,7 @@ type Route struct {
 	Name     string
 	Prefix   string
 	Upstream *url.URL
+	Proxy    *httputil.ReverseProxy
 }
 
 func NewGate(ctx context.Context, config config.GateConfig) (*Gate, error) {
@@ -77,11 +80,12 @@ func (h *Handler) Lookup(path string) (Route, bool) {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path, ok := h.Lookup(r.URL.Path)
+	route, ok := h.Lookup(r.URL.Path)
 
 	if !ok {
 		appjson.WriteError(w, fmt.Sprintf(ErrPathNotFound.Error(), r.URL.Path), http.StatusNotFound)
 		return
 	}
-	fmt.Println("path is ", path)
+	slog.Debug("received route: ", "route", route)
+	route.Proxy.ServeHTTP(w, r)
 }
