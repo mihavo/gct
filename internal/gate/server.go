@@ -4,15 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
-	"uuid"
 
 	"github.com/mihavo/gct/internal/config"
 	appjson "github.com/mihavo/gct/internal/core/json"
@@ -58,10 +55,10 @@ func NewGate(ctx context.Context, config config.GateConfig) (*Gate, error) {
 	}
 
 	handler := NewHanlder(&routes)
-
+	logger := LoggingMiddleware{}
 	server := http.Server{
 		Addr:    net.JoinHostPort(config.Server.ListenAddress, strconv.Itoa(config.Server.Port)),
-		Handler: handler,
+		Handler: logger.Process(handler),
 	}
 
 	return &Gate{
@@ -91,25 +88,11 @@ func (h *Handler) Lookup(path string) (Route, bool) {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	route, ok := h.Lookup(r.URL.Path)
-
-	rwWrapper := ResponseWriterWithCode{
-		code:           200,
-		ResponseWriter: w,
-	}
-	requestId := uuid.New()
-	start := time.Now()
-
-	defer func() {
-		slog.Info("Request Details: ", "RequestID", requestId, "method", r.Method, "path", r.URL.Path, "route", route.Name, "status", rwWrapper.code, "duration:", time.Since(start))
-	}()
-
 	if !ok {
-		appjson.WriteError(&rwWrapper, fmt.Sprintf(ErrPathNotFound.Error(), r.URL.Path), http.StatusNotFound)
+		appjson.WriteError(w, fmt.Sprintf(ErrPathNotFound.Error(), r.URL.Path), http.StatusNotFound)
 		return
 	}
-
-	r = r.WithContext(context.WithValue(r.Context(), RequestID{}, requestId))
-	route.Proxy.ServeHTTP(&rwWrapper, r)
+	route.Proxy.ServeHTTP(w, r)
 }
 
 func (rw *ResponseWriterWithCode) WriteHeader(statusCode int) {

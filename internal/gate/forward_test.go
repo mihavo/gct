@@ -16,6 +16,7 @@ func newEchoUpstream(t *testing.T, name string) *httptest.Server {
 		w.Header().Set("X-Seen-Query", r.URL.RawQuery)
 		w.Header().Set("X-Seen-Prefix", r.Header.Get("X-Forwarded-Prefix"))
 		w.Header().Set("X-Seen-Forwarded-For", r.Header.Get("X-Forwarded-For"))
+		w.Header().Set("X-Seen-Request-Id", r.Header.Get("X-Request-Id"))
 		io.WriteString(w, name)
 	}))
 	t.Cleanup(srv.Close)
@@ -38,7 +39,8 @@ func TestForward(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building routing table: %v", err)
 	}
-	h := &Handler{Routes: &table}
+	logger := LoggingMiddleware{}
+	h := logger.Process(&Handler{Routes: &table})
 
 	tests := []struct {
 		name       string
@@ -91,6 +93,9 @@ func TestForward(t *testing.T) {
 			}
 			if got := res.Header.Get("X-Seen-Forwarded-For"); got == "" {
 				t.Errorf("GET %s upstream X-Forwarded-For is empty", tt.target)
+			}
+			if got := res.Header.Get("X-Seen-Request-Id"); got == "" {
+				t.Errorf("GET %s upstream X-Request-Id is empty", tt.target)
 			}
 		})
 	}
