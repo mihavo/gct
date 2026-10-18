@@ -3,11 +3,13 @@ package gate
 import (
 	"cmp"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"slices"
 	"strings"
+	"uuid"
 
 	"github.com/mihavo/gct/internal/config"
 	appjson "github.com/mihavo/gct/internal/core/json"
@@ -56,9 +58,14 @@ func buildProxy(config config.RoutesConfig, upstream *url.URL) *httputil.Reverse
 			pr.Out.URL.Path = rest
 			pr.SetURL(upstream)
 			pr.Out.Header.Set("X-Forwarded-Prefix", config.Prefix)
+
+			requestUUID := pr.In.Context().Value(RequestID{}).(uuid.UUID)
+			pr.Out.Header.Set("X-Request-Id", requestUUID.String())
 			pr.SetXForwarded()
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			requestID, _ := r.Context().Value(RequestID{}).(uuid.UUID)
+			slog.Error("upstream unreachable", "RequestID", requestID, "upstream", upstream.String(), "err", err)
 			appjson.WriteError(w, "service unavailable", http.StatusBadGateway)
 		}}
 }

@@ -5,6 +5,9 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/mihavo/gct/internal/config"
 	"github.com/mihavo/gct/internal/gate"
@@ -29,8 +32,26 @@ func main() {
 	}
 	slog.Debug("Gate: ", "gate", gate)
 
-	err = gate.Server.ListenAndServe()
-	if err != nil {
-		log.Fatalf("could not start gate server: %v", err)
+	notifyCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- gate.Server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		log.Fatalf("gate server failed: %v", err)
+	case <-notifyCtx.Done():
+		stop()
+		shutdownCtx, stop := context.WithTimeout(ctx, time.Duration(8*time.Second))
+		defer stop()
+		err := gate.Server.Shutdown(shutdownCtx)
+		if err != nil {
+			log.Fatalf("could not shutdown gate server gracefully %v", err)
+			return
+		}
+		slog.Info("gate server is down", "context", notifyCtx.Err().Error())
 	}
 }

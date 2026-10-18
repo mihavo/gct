@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/mihavo/gct/internal/config"
 	appjson "github.com/mihavo/gct/internal/core/json"
@@ -29,6 +30,9 @@ type Handler struct {
 type ResponseWriterWithCode struct {
 	code int
 	http.ResponseWriter
+}
+
+type RequestID struct {
 }
 
 type RoutingTable struct {
@@ -92,16 +96,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		code:           200,
 		ResponseWriter: w,
 	}
+	requestId := uuid.New()
+	start := time.Now()
+
+	defer func() {
+		slog.Info("Request Details: ", "RequestID", requestId, "method", r.Method, "path", r.URL.Path, "route", route.Name, "status", rwWrapper.code, "duration:", time.Since(start))
+	}()
 
 	if !ok {
-		appjson.WriteError(w, fmt.Sprintf(ErrPathNotFound.Error(), r.URL.Path), http.StatusNotFound)
-		slog.Info("Invalid path for request", "path", r.URL.Path)
+		appjson.WriteError(&rwWrapper, fmt.Sprintf(ErrPathNotFound.Error(), r.URL.Path), http.StatusNotFound)
 		return
 	}
 
-	start := time.Now()
+	r = r.WithContext(context.WithValue(r.Context(), RequestID{}, requestId))
 	route.Proxy.ServeHTTP(&rwWrapper, r)
-	slog.Info("Request Details: ", "method", r.Method, "path", r.URL.Path, "route", route.Upstream.String(), "status", rwWrapper.code, "duration:", time.Since(start))
 }
 
 func (rw *ResponseWriterWithCode) WriteHeader(statusCode int) {

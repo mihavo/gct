@@ -11,6 +11,7 @@ services:
       - ./gate.yml:/etc/gct/gate.yml:ro
     ports:
       - "8080:8080"
+    stop_grace_period: 10s
     depends_on:
       - auth
       - service1
