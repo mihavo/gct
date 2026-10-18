@@ -54,11 +54,14 @@ func NewGate(ctx context.Context, config config.GateConfig) (*Gate, error) {
 		return nil, err
 	}
 
-	handler := NewHanlder(&routes)
-	logger := LoggingMiddleware{}
+	var handler http.Handler = NewHanlder(&routes)
+	handler = Chain(handler,
+		&LoggingMiddleware{},
+		&RecoveryMiddleware{})
+
 	server := http.Server{
 		Addr:    net.JoinHostPort(config.Server.ListenAddress, strconv.Itoa(config.Server.Port)),
-		Handler: logger.Process(handler),
+		Handler: handler,
 	}
 
 	return &Gate{
