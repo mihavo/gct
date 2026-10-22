@@ -61,12 +61,12 @@ func (c *Checker) Check(ctx context.Context) {
 				}
 				result.errorData = err
 			} else {
-				if result.statusCode != response.StatusCode {
-					result.outcome = OutcomeOK
-					result.statusCode = response.StatusCode
-				} else {
+				if response.StatusCode != target.ExpectedStatus {
 					result.outcome = OutcomeFail
+				} else {
+					result.outcome = OutcomeOK
 				}
+				result.statusCode = response.StatusCode
 				response.Body.Close()
 			}
 
