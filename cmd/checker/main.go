@@ -1,16 +1,33 @@
 package main
 
 import (
+	"context"
 	"log"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	_ "time/tzdata"
 
+	"github.com/mihavo/gct/internal/checker"
 	"github.com/mihavo/gct/internal/config"
 )
 
 func main() {
-	checkerConfig, err := config.LoadYAML[config.CheckerConfig]("./configs/checker.yml")
-	if err != nil {
-		log.Fatalf("loading checker config: %v", err)
+	ctx := context.Background()
+	configPath, ok := os.LookupEnv("CHECKER_CONFIG_PATH")
+	if !ok {
+		configPath = "./configs/checker.yml"
 	}
+	checkerConfig, err := config.LoadYAML[config.CheckerConfig](configPath)
+	if err != nil {
+		log.Fatalf("loading gate config: %v", err)
+	}
+	slog.Debug("gate config loaded: %+v", "config", checkerConfig)
 
-	log.Printf("checker config loaded: %+v", checkerConfig)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	checker, err := checker.NewChecker(*checkerConfig)
+	checker.Schedule(ctx)
+
 }

@@ -16,6 +16,22 @@ services:
       - auth
       - service1
 
+  checker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        CMD: checker
+    environment:
+      CHECKER_CONFIG_PATH: /etc/gct/checker.yml
+      TZ: ${TZ:-Europe/Athens}
+    volumes:
+      - ./checker.yml:/etc/gct/checker.yml:ro
+    tty: true
+    stop_grace_period: 10s
+    depends_on:
+      - gate
+
   auth:
     image: traefik/whoami
     environment:

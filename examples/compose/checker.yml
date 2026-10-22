@@ -1,0 +1,12 @@
+interval: 1s
+timeout: 1s
+workers: 2
+
+targets:
+  - name: "gate-auth"
+    url: "http://gate:8080/auth"
+    expected_status: 200
+
+  - name: "gate-service1"
+    url: "http://gate:8080/service1"
+    expected_status: 200
