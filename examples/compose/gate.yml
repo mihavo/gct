@@ -11,3 +11,27 @@ routes:
   - name: "service1"
     prefix: "/service1"
     location: "http://service1:80"
+
+  - name: "users"
+    prefix: "/users"
+    location: "http://users:80"
+
+  - name: "orders"
+    prefix: "/orders"
+    location: "http://orders:80"
+
+  - name: "payments"
+    prefix: "/payments"
+    location: "http://payments:80"
+
+  - name: "search"
+    prefix: "/search"
+    location: "http://search:80"
+
+  - name: "inventory"
+    prefix: "/inventory"
+    location: "http://inventory:80"
+
+  - name: "billing"
+    prefix: "/billing"
+    location: "http://billing:80"

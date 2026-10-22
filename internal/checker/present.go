@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"text/tabwriter"
 	"time"
 )
@@ -32,10 +33,46 @@ func (o Outcome) responded() bool {
 	return o == OutcomeOK || o == OutcomeFail
 }
 
+const (
+	ansiReset  = "\x1b[0m"
+	ansiBold   = "\x1b[1m"
+	ansiDim    = "\x1b[2m"
+	ansiRed    = "\x1b[31m"
+	ansiGreen  = "\x1b[32m"
+	ansiYellow = "\x1b[33m"
+	ansiMagma  = "\x1b[35m"
+	ansiCyan   = "\x1b[36m"
+)
+
+func (o Outcome) color() string {
+	switch o {
+	case OutcomeOK:
+		return ansiGreen
+	case OutcomeFail:
+		return ansiRed
+	case OutcomeTimeout:
+		return ansiYellow
+	case OutcomeUnreachable:
+		return ansiMagma
+	case OutcomeInvalid:
+		return ansiCyan
+	default:
+		return ""
+	}
+}
+
 const roundTimeLayout = "2006-01-02 15:04:05"
 
-func presentResults(w io.Writer, results []Result, now time.Time) error {
-	if _, err := fmt.Fprintf(w, "round at %s\n", now.Format(roundTimeLayout)); err != nil {
+func presentResults(w io.Writer, results []Result, now time.Time, color bool) error {
+	paint := func(code, text string) string {
+		if !color || code == "" {
+			return text
+		}
+		return code + text + ansiReset
+	}
+
+	stamp := fmt.Sprintf("round at %s", now.Format(roundTimeLayout))
+	if _, err := fmt.Fprintln(w, paint(ansiDim, stamp)); err != nil {
 		return err
 	}
 
@@ -49,7 +86,8 @@ func presentResults(w io.Writer, results []Result, now time.Time) error {
 		return cmp.Compare(a.targetName, b.targetName)
 	})
 
-	tw := tabwriter.NewWriter(w, 0, 8, 2, ' ', 0)
+	var table bytes.Buffer
+	tw := tabwriter.NewWriter(&table, 0, 8, 2, ' ', 0)
 	fmt.Fprintln(tw, "TARGET\tSTATUS\tEXPECTED\tRESULT\tDURATION\tERROR")
 
 	healthy := 0
@@ -74,19 +112,33 @@ func presentResults(w io.Writer, results []Result, now time.Time) error {
 		return err
 	}
 
-	_, err := fmt.Fprintf(w, "%d targets, %d ok, %d not ok\n",
-		len(rows), healthy, len(rows)-healthy)
+	lines := strings.Split(strings.TrimSuffix(table.String(), "\n"), "\n")
+	if _, err := fmt.Fprintln(w, paint(ansiBold, lines[0])); err != nil {
+		return err
+	}
+	for i, line := range lines[1:] {
+		if _, err := fmt.Fprintln(w, paint(rows[i].outcome.color(), line)); err != nil {
+			return err
+		}
+	}
+
+	summary := fmt.Sprintf("%d targets, %d ok, %d not ok", len(rows), healthy, len(rows)-healthy)
+	summaryColor := ansiGreen
+	if healthy < len(rows) {
+		summaryColor = ansiRed
+	}
+	_, err := fmt.Fprintln(w, paint(summaryColor, summary))
 	return err
 }
 
 type tableWriter struct {
 	w         io.Writer
-	inPlace   bool
+	tty       bool
 	lastLines int
 }
 
 func newTableWriter(w io.Writer) *tableWriter {
-	return &tableWriter{w: w, inPlace: isCharDevice(w)}
+	return &tableWriter{w: w, tty: isCharDevice(w)}
 }
 
 func isCharDevice(w io.Writer) bool {
@@ -103,11 +155,11 @@ func isCharDevice(w io.Writer) bool {
 
 func (t *tableWriter) render(results []Result) error {
 	var buf bytes.Buffer
-	if err := presentResults(&buf, results, time.Now()); err != nil {
+	if err := presentResults(&buf, results, time.Now(), t.tty); err != nil {
 		return err
 	}
 
-	if t.inPlace && t.lastLines > 0 {
+	if t.tty && t.lastLines > 0 {
 		if _, err := fmt.Fprintf(t.w, "\x1b[%dA\x1b[J", t.lastLines); err != nil {
 			return err
 		}
@@ -117,7 +169,7 @@ func (t *tableWriter) render(results []Result) error {
 		return err
 	}
 
-	if t.inPlace {
+	if t.tty {
 		t.lastLines = bytes.Count(buf.Bytes(), []byte("\n"))
 	}
 	return nil

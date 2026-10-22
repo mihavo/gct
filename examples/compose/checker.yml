@@ -1,12 +1,36 @@
-interval: 1s
+interval: 500ms
 timeout: 1s
-workers: 2
+workers: 4
 
 targets:
-  - name: "gate-auth"
-    url: "http://gate:8080/auth"
+  - name: "auth"
+    url: "http://auth:80/"
     expected_status: 200
 
-  - name: "gate-service1"
-    url: "http://gate:8080/service1"
+  - name: "service1"
+    url: "http://service1:80/"
+    expected_status: 200
+
+  - name: "users"
+    url: "http://users:80/"
+    expected_status: 200
+
+  - name: "orders"
+    url: "http://orders:80/"
+    expected_status: 200
+
+  - name: "payments"
+    url: "http://payments:80/"
+    expected_status: 200
+
+  - name: "search"
+    url: "http://search:80/"
+    expected_status: 200
+
+  - name: "inventory"
+    url: "http://inventory:80/"
+    expected_status: 200
+
+  - name: "billing"
+    url: "http://billing:80/"
     expected_status: 200

@@ -1,12 +1,37 @@
-interval: 10s
-timeout: 2s
+interval: 500ms
+timeout: 1s
 workers: 4
 
 targets:
   - name: "auth"
-    url: "http://localhost:8081/health"
+    url: "http://localhost:8080/auth"
     expected_status: 200
 
   - name: "service1"
-    url: "http://localhost:8082/health"
+    url: "http://localhost:8080/service1"
     expected_status: 200
+
+  - name: "users"
+    url: "http://localhost:8080/users"
+    expected_status: 200
+
+  - name: "orders"
+    url: "http://localhost:8080/orders"
+    expected_status: 200
+
+  - name: "payments"
+    url: "http://localhost:8080/payments"
+    expected_status: 200
+
+  - name: "search"
+    url: "http://localhost:8080/search"
+    expected_status: 200
+
+  - name: "inventory"
+    url: "http://localhost:8080/inventory"
+    expected_status: 200
+
+  - name: "billing"
+    url: "http://localhost:8080/billing"
+    expected_status: 200
+

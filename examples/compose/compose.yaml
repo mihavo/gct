@@ -15,6 +15,12 @@ services:
     depends_on:
       - auth
       - service1
+      - users
+      - orders
+      - payments
+      - search
+      - inventory
+      - billing
 
   checker:
     build:
@@ -29,8 +35,6 @@ services:
       - ./checker.yml:/etc/gct/checker.yml:ro
     tty: true
     stop_grace_period: 10s
-    depends_on:
-      - gate
 
   auth:
     image: traefik/whoami
@@ -41,3 +45,33 @@ services:
     image: traefik/whoami
     environment:
       WHOAMI_NAME: service1
+
+  users:
+    image: traefik/whoami
+    environment:
+      WHOAMI_NAME: users
+
+  orders:
+    image: traefik/whoami
+    environment:
+      WHOAMI_NAME: orders
+
+  payments:
+    image: traefik/whoami
+    environment:
+      WHOAMI_NAME: payments
+
+  search:
+    image: traefik/whoami
+    environment:
+      WHOAMI_NAME: search
+
+  inventory:
+    image: traefik/whoami
+    environment:
+      WHOAMI_NAME: inventory
+
+  billing:
+    image: traefik/whoami
+    environment:
+      WHOAMI_NAME: billing

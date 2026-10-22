@@ -63,6 +63,7 @@ func (c *Checker) Check(ctx context.Context) {
 			} else {
 				if result.statusCode != response.StatusCode {
 					result.outcome = OutcomeOK
+					result.statusCode = response.StatusCode
 				} else {
 					result.outcome = OutcomeFail
 				}
