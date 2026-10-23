@@ -13,6 +13,7 @@ type Checker struct {
 	client  *http.Client
 	targets chan Target
 	results chan Result
+	busy    chan struct{}
 }
 
 type Target = config.TargetConfig
@@ -51,5 +52,6 @@ func NewChecker(config config.CheckerConfig) (*Checker, error) {
 		client:  &http.Client{},
 		targets: make(chan Target),
 		results: make(chan Result),
+		busy:    make(chan struct{}),
 	}, nil
 }

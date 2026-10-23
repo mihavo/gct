@@ -26,6 +26,12 @@ func (c *Checker) GatherAndPresent(ctx context.Context) {
 					slog.Error("rendering results", "error", err)
 				}
 				results = results[:0]
+				select {
+				case c.busy <- struct{}{}:
+				case <-ctx.Done():
+					slog.Info("Shutting down gatherer:")
+					return
+				}
 			}
 		}
 	}
