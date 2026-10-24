@@ -24,6 +24,8 @@ func (o Outcome) String() string {
 		return "UNREACHABLE"
 	case OutcomeInvalid:
 		return "INVALID"
+	case OutcomePending:
+		return "PENDING"
 	default:
 		return fmt.Sprintf("Outcome(%d)", int(o))
 	}
@@ -56,6 +58,8 @@ func (o Outcome) color() string {
 		return ansiMagma
 	case OutcomeInvalid:
 		return ansiCyan
+	case OutcomePending:
+		return ansiDim
 	default:
 		return ""
 	}

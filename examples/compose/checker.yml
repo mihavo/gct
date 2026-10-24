@@ -1,5 +1,5 @@
 interval: 500ms
-timeout: 1s
+timeout: 10s
 workers: 4
 
 targets:

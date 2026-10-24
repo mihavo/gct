@@ -4,14 +4,18 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 )
 
 func (c *Checker) GatherAndPresent(ctx context.Context) {
 
-	results := make([]Result, 0, len(c.Config.Targets))
+	results := make(map[string]Result, len(c.Config.Targets))
 	table := newTableWriter(os.Stdout)
-	for {
 
+	ticker := time.NewTicker(c.Config.Interval)
+	defer ticker.Stop()
+
+	for {
 		select {
 		case <-ctx.Done():
 			slog.Info("Shutting down gatherer:")
@@ -20,18 +24,29 @@ func (c *Checker) GatherAndPresent(ctx context.Context) {
 			if !ok {
 				continue
 			}
-			results = append(results, result)
-			if len(results) == len(c.Config.Targets) {
-				if err := table.render(results); err != nil {
-					slog.Error("rendering results", "error", err)
+			results[result.targetName] = result
+			select {
+			case c.busy <- result.targetName:
+			case <-ctx.Done():
+				slog.Info("Shutting down gatherer:")
+				return
+			}
+		case <-ticker.C:
+			rows := make([]Result, 0, len(c.Config.Targets))
+			for _, target := range c.Config.Targets {
+				row, ok := results[target.Name]
+				if !ok {
+					row = Result{
+						targetName:     target.Name,
+						expectedStatus: target.ExpectedStatus,
+						outcome:        OutcomePending,
+					}
 				}
-				results = results[:0]
-				select {
-				case c.busy <- struct{}{}:
-				case <-ctx.Done():
-					slog.Info("Shutting down gatherer:")
-					return
-				}
+				rows = append(rows, row)
+			}
+
+			if err := table.render(rows); err != nil {
+				slog.Error("rendering results", "error", err)
 			}
 		}
 	}

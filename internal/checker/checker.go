@@ -13,7 +13,7 @@ type Checker struct {
 	client  *http.Client
 	targets chan Target
 	results chan Result
-	busy    chan struct{}
+	busy    chan string
 }
 
 type Target = config.TargetConfig
@@ -35,6 +35,7 @@ const (
 	OutcomeTimeout
 	OutcomeUnreachable
 	OutcomeInvalid
+	OutcomePending
 )
 
 func NewChecker(config config.CheckerConfig) (*Checker, error) {
@@ -52,6 +53,6 @@ func NewChecker(config config.CheckerConfig) (*Checker, error) {
 		client:  &http.Client{},
 		targets: make(chan Target),
 		results: make(chan Result),
-		busy:    make(chan struct{}),
+		busy:    make(chan string),
 	}, nil
 }
