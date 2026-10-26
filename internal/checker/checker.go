@@ -30,7 +30,8 @@ type Result struct {
 type Outcome int
 
 const (
-	OutcomeOK Outcome = iota
+	OutcomeUnknownError Outcome = iota
+	OutcomeOK
 	OutcomeFail
 	OutcomeTimeout
 	OutcomeUnreachable
@@ -46,6 +47,14 @@ func NewChecker(config config.CheckerConfig) (*Checker, error) {
 
 	if config.Workers <= 0 {
 		return nil, errors.New("No workers amount defined")
+	}
+
+	if config.Interval <= 0 {
+		return nil, errors.New("interval must be positive")
+	}
+
+	if config.Timeout <= 0 {
+		return nil, errors.New("timeout must be positive")
 	}
 
 	return &Checker{

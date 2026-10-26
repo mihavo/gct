@@ -17,7 +17,7 @@ func (c *Checker) Check(ctx context.Context) {
 			return
 		case target, ok := <-c.targets:
 			if !ok {
-				continue
+				return
 			}
 			start := time.Now()
 
@@ -34,9 +34,10 @@ func (c *Checker) Check(ctx context.Context) {
 					errorData:      err,
 					outcome:        OutcomeInvalid,
 				}:
+					continue
 				case <-ctx.Done():
+					return
 				}
-				return
 			}
 
 			response, err := c.client.Do(request)
@@ -47,6 +48,7 @@ func (c *Checker) Check(ctx context.Context) {
 				duration:       elapsed,
 				targetName:     target.Name,
 				expectedStatus: target.ExpectedStatus,
+				outcome:        OutcomePending,
 			}
 
 			if err != nil {
@@ -58,6 +60,8 @@ func (c *Checker) Check(ctx context.Context) {
 					result.outcome = OutcomeTimeout
 				case errors.As(err, &opErr) && opErr.Op == "dial":
 					result.outcome = OutcomeUnreachable
+				default:
+					result.outcome = OutcomeUnknownError
 				}
 				result.errorData = err
 			} else {

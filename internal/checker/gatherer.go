@@ -14,6 +14,7 @@ func (c *Checker) GatherAndPresent(ctx context.Context) {
 
 	ticker := time.NewTicker(c.Config.Interval)
 	defer ticker.Stop()
+	defer close(c.busy)
 
 	for {
 		select {
@@ -22,7 +23,8 @@ func (c *Checker) GatherAndPresent(ctx context.Context) {
 			return
 		case result, ok := <-c.results:
 			if !ok {
-				continue
+				slog.Info("Shutting down gatherer, results channel closed")
+				return
 			}
 			results[result.targetName] = result
 			select {

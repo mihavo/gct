@@ -27,7 +27,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	checker, err := checker.NewChecker(*checkerConfig)
-	checker.Schedule(ctx)
+	chck, err := checker.NewChecker(*checkerConfig)
+
+	if err != nil {
+		log.Fatalf("Could not instantiate checker %v", err)
+	}
+	chck.Schedule(ctx)
 
 }

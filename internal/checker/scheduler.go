@@ -12,14 +12,17 @@ func (c *Checker) Schedule(ctx context.Context) {
 	ticker := time.NewTicker(c.Config.Interval)
 	defer ticker.Stop()
 	busy := map[string]struct{}{}
-	var wg sync.WaitGroup
-	wg.Go(func() { c.GatherAndPresent(ctx) })
+	var workers, gatherer sync.WaitGroup
+	gatherer.Go(func() { c.GatherAndPresent(ctx) })
 	for i := 0; i < c.Config.Workers; i++ {
-		wg.Go(func() {
+		workers.Go(func() {
 			c.Check(ctx)
 		})
 	}
-	defer wg.Wait()
+	defer gatherer.Wait()
+	defer close(c.results)
+	defer workers.Wait()
+	defer close(c.targets)
 
 	for {
 		select {
