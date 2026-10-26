@@ -2,6 +2,7 @@ package checker
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -55,6 +56,14 @@ func NewChecker(config config.CheckerConfig) (*Checker, error) {
 
 	if config.Timeout <= 0 {
 		return nil, errors.New("timeout must be positive")
+	}
+
+	names := make(map[string]struct{}, len(config.Targets))
+	for _, target := range config.Targets {
+		if _, ok := names[target.Name]; ok {
+			return nil, fmt.Errorf("duplicate target name %q", target.Name)
+		}
+		names[target.Name] = struct{}{}
 	}
 
 	return &Checker{
