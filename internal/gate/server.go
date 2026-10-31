@@ -13,6 +13,7 @@ import (
 
 	"github.com/mihavo/gct/internal/config"
 	appjson "github.com/mihavo/gct/internal/core/json"
+	"github.com/redis/go-redis/v9"
 )
 
 type Gate struct {
@@ -43,7 +44,7 @@ type Route struct {
 	Proxy    *httputil.ReverseProxy
 }
 
-func NewGate(ctx context.Context, config config.GateConfig) (*Gate, error) {
+func NewGate(ctx context.Context, redis *redis.Client, config config.GateConfig) (*Gate, error) {
 
 	if len(config.Routes) == 0 {
 		return nil, errors.New("No routes declared")
@@ -55,9 +56,17 @@ func NewGate(ctx context.Context, config config.GateConfig) (*Gate, error) {
 	}
 
 	var handler http.Handler = NewHanlder(&routes)
+
+	limiter, err := NewLimiter(redis, config.Limiter)
+
+	if err != nil {
+		return nil, err
+	}
+
 	handler = Chain(handler,
 		&LoggingMiddleware{},
-		&RecoveryMiddleware{})
+		&RecoveryMiddleware{},
+		&LimiterMiddleware{limiter: limiter})
 
 	server := http.Server{
 		Addr:    net.JoinHostPort(config.Server.ListenAddress, strconv.Itoa(config.Server.Port)),

@@ -3,6 +3,12 @@ server:
   port: 8080
   enable_ssl: false
 
+limiter:
+  bucket_size: 10
+  refill_rate:
+    tokens: 1
+    per: 1s
+
 routes:
   - name: "auth"
     prefix: "/auth"

@@ -3,86 +3,53 @@ package gate
 import (
 	"context"
 	"errors"
-	"strconv"
-	"sync"
 	"time"
 
+	"github.com/mihavo/gct/internal/config"
 	redis "github.com/redis/go-redis/v9"
 )
 
-const (
-	LIMITER_REDIS_ADDR                  = "LIMITER_REDIS_ADDR"
-	LIMITER_REDIS_PASSWORD              = "LIMITER_REDIS_PASSWORD"
-	LIMITER_REDIS_DB                    = "LIMITER_REDIS_DB"
-	LIMITER_REDIS_KEY_PREFIX            = "limiter:"
-	LIMITER_REDIS_TOKENS_FIELD          = "tokens"
-	LIMITER_REDIS_LAST_SUCCESSFUL_FIELD = "last_successful"
-	LIMITER_MAX_RETRIES                 = 5
-)
-
-type limiter struct {
+type Limiter struct {
 	redis  *redis.Client
-	config limiterConfig
-	state  map[limiterKey]*limiterState
-	mu     sync.Mutex
+	config config.LimiterConfig
 }
 
 type limiterKey = string
-
-type limiterConfig struct {
-	bucketSize int
-	refillRate refillRate
-}
 
 type limiterState struct {
 	tokens         int
 	lastSuccessful time.Time
 }
 
-type refillRate struct {
+type RefillRate struct {
 	tokens int
 	per    time.Duration
 }
 
-func NewLimiter(ctx context.Context, config limiterConfig) (*limiter, error) {
-	if config.bucketSize <= 0 {
+func NewLimiter(redis *redis.Client, config config.LimiterConfig) (*Limiter, error) {
+	if config.BucketSize <= 0 {
 		return nil, errors.New("bucket size should be greater than zero")
 	}
-	if config.refillRate.tokens <= 0 {
+	if config.RefillRate.Tokens <= 0 {
 		return nil, errors.New("refill tokens should be greater than zero")
 	}
-	if config.refillRate.per <= 0 {
+	if config.RefillRate.Per <= 0 {
 		return nil, errors.New("refill tokens interval should be greater than zero")
 	}
 
-	opts, err := requireEnv(LIMITER_REDIS_ADDR, LIMITER_REDIS_PASSWORD, LIMITER_REDIS_DB)
-
-	if err != nil {
-		return nil, err
-	}
-	db, err := strconv.Atoi(opts[LIMITER_REDIS_DB])
-
-	if err != nil {
-		return nil, errors.New("Could not parse redis db name option")
-	}
-	client := redis.NewClient(&redis.Options{
-		Addr:     opts[LIMITER_REDIS_ADDR],
-		Password: opts[LIMITER_REDIS_PASSWORD],
-		DB:       db})
-
-	return &limiter{
-		redis:  client,
+	return &Limiter{
+		redis:  redis,
 		config: config,
-		state:  make(map[limiterKey]*limiterState)}, nil
+	}, nil
 }
 
-func (l *limiter) limit(ctx context.Context, key limiterKey, now time.Time) error {
+func (l *Limiter) limit(ctx context.Context, key limiterKey, now time.Time) error {
 	redisKey := LIMITER_REDIS_KEY_PREFIX + key
 	retries := 0
 	for {
 		err := l.redis.Watch(ctx, func(tx *redis.Tx) error {
 			lastSuccessful, err := tx.HGet(ctx, redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD).Time()
-			tokens := l.config.bucketSize
+			tokens := l.config.BucketSize
 
 			switch {
 			case errors.Is(err, redis.Nil):
@@ -96,9 +63,9 @@ func (l *limiter) limit(ctx context.Context, key limiterKey, now time.Time) erro
 				}
 			}
 
-			intervals := int(now.Sub(lastSuccessful) / l.config.refillRate.per)
+			intervals := int(now.Sub(lastSuccessful) / l.config.RefillRate.Per)
 			if intervals > 0 {
-				tokens = min(l.config.bucketSize, tokens+intervals*l.config.refillRate.tokens)
+				tokens = min(l.config.BucketSize, tokens+intervals*l.config.RefillRate.Tokens)
 			}
 
 			if tokens <= 0 {
@@ -117,6 +84,9 @@ func (l *limiter) limit(ctx context.Context, key limiterKey, now time.Time) erro
 		if errors.Is(err, redis.TxFailedErr) && retries < LIMITER_MAX_RETRIES {
 			retries++
 			continue
+		}
+		if retries == LIMITER_MAX_RETRIES {
+			return ErrRetriesExceeded
 		}
 		return err
 	}

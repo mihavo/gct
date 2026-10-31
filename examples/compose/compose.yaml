@@ -7,6 +7,9 @@ services:
       dockerfile: Dockerfile
     environment:
       GATE_CONFIG_PATH: /etc/gct/gate.yml
+      LIMITER_REDIS_ADDR: redis:6379
+      LIMITER_REDIS_PASSWORD: ""
+      LIMITER_REDIS_DB: "0"
     volumes:
       - ./gate.yml:/etc/gct/gate.yml:ro
     ports:

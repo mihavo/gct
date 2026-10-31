@@ -3,8 +3,9 @@ package config
 import "time"
 
 type GateConfig struct {
-	Server ServerConfig   `yaml:"server"`
-	Routes []RoutesConfig `yaml:"routes"`
+	Server  ServerConfig   `yaml:"server"`
+	Limiter LimiterConfig  `yaml:"limiter"`
+	Routes  []RoutesConfig `yaml:"routes"`
 }
 
 type ServerConfig struct {
@@ -17,6 +18,16 @@ type RoutesConfig struct {
 	Name     string `yaml:"name"`
 	Prefix   string `yaml:"prefix"`
 	Location string `yaml:"location"`
+}
+
+type LimiterConfig struct {
+	BucketSize int        `yaml:"bucket_size"`
+	RefillRate RefillRate `yaml:"refill_rate"`
+}
+
+type RefillRate struct {
+	Tokens int           `yaml:"tokens"`
+	Per    time.Duration `yaml:"per"`
 }
 
 type CheckerConfig struct {

@@ -75,7 +75,7 @@ func buildProxy(config config.RoutesConfig, upstream *url.URL) *httputil.Reverse
 		}}
 }
 
-func requireEnv(keys ...string) (map[string]string, error) {
+func RequireEnv(keys ...string) (map[string]string, error) {
 	vals := make(map[string]string, len(keys))
 	var missing []string
 
