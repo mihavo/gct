@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"uuid"
@@ -72,4 +73,23 @@ func buildProxy(config config.RoutesConfig, upstream *url.URL) *httputil.Reverse
 			log.Error("upstream unreachable", "upstream", upstream.String(), "err", err)
 			appjson.WriteError(w, "service unavailable", http.StatusBadGateway)
 		}}
+}
+
+func requireEnv(keys ...string) (map[string]string, error) {
+	vals := make(map[string]string, len(keys))
+	var missing []string
+
+	for _, k := range keys {
+		v, ok := os.LookupEnv(k)
+		if !ok {
+			missing = append(missing, k)
+			continue
+		}
+		vals[k] = v
+	}
+
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("missing env vars: %s", strings.Join(missing, ", "))
+	}
+	return vals, nil
 }
