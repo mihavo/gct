@@ -11,15 +11,16 @@ import (
 )
 
 const (
-	LIMITER_REDIS_ADDR                = "LIMITER_REDIS_ADDR"
-	LIMITER_REDIS_PASSWORD            = "LIMITER_REDIS_PASSWORD"
-	LIMITER_REDIS_DB                  = "LIMITER_REDIS_DB"
-	LIMITER_REDIS_TOKENS_KEY          = "TOKENS"
-	LIMITER_REDIS_LAST_SUCCESSFUL_KEY = "LAST_SUCCESSFUL"
+	LIMITER_REDIS_ADDR                  = "LIMITER_REDIS_ADDR"
+	LIMITER_REDIS_PASSWORD              = "LIMITER_REDIS_PASSWORD"
+	LIMITER_REDIS_DB                    = "LIMITER_REDIS_DB"
+	LIMITER_REDIS_KEY_PREFIX            = "limiter:"
+	LIMITER_REDIS_TOKENS_FIELD          = "tokens"
+	LIMITER_REDIS_LAST_SUCCESSFUL_FIELD = "last_successful"
+	LIMITER_MAX_RETRIES                 = 5
 )
 
 type limiter struct {
-	ctx    context.Context
 	redis  *redis.Client
 	config limiterConfig
 	state  map[limiterKey]*limiterState
@@ -70,45 +71,53 @@ func NewLimiter(ctx context.Context, config limiterConfig) (*limiter, error) {
 		DB:       db})
 
 	return &limiter{
-		ctx:    ctx,
 		redis:  client,
 		config: config,
 		state:  make(map[limiterKey]*limiterState)}, nil
 }
 
-func (l *limiter) limit(key limiterKey, now time.Time) error {
+func (l *limiter) limit(ctx context.Context, key limiterKey, now time.Time) error {
+	redisKey := LIMITER_REDIS_KEY_PREFIX + key
+	retries := 0
+	for {
+		err := l.redis.Watch(ctx, func(tx *redis.Tx) error {
+			lastSuccessful, err := tx.HGet(ctx, redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD).Time()
+			tokens := l.config.bucketSize
 
-	return l.redis.Watch(l.ctx, func(tx *redis.Tx) error {
-		lastSuccessful, err := tx.HGet(l.ctx, LIMITER_REDIS_LAST_SUCCESSFUL_KEY, key).Time()
-		tokens := l.config.bucketSize
-
-		switch {
-		case errors.Is(err, redis.Nil):
-			lastSuccessful = now
-		case err != nil:
-			return err
-		default:
-			tokens, err = tx.HGet(l.ctx, LIMITER_REDIS_TOKENS_KEY, key).Int()
-			if err != nil && !errors.Is(err, redis.Nil) {
+			switch {
+			case errors.Is(err, redis.Nil):
+				lastSuccessful = now
+			case err != nil:
 				return err
+			default:
+				tokens, err = tx.HGet(ctx, redisKey, LIMITER_REDIS_TOKENS_FIELD).Int()
+				if err != nil && !errors.Is(err, redis.Nil) {
+					return err
+				}
 			}
-		}
 
-		intervals := int(now.Sub(lastSuccessful) / l.config.refillRate.per)
-		if intervals > 0 {
-			tokens = min(l.config.bucketSize, tokens+intervals*l.config.refillRate.tokens)
-		}
+			intervals := int(now.Sub(lastSuccessful) / l.config.refillRate.per)
+			if intervals > 0 {
+				tokens = min(l.config.bucketSize, tokens+intervals*l.config.refillRate.tokens)
+			}
 
-		if tokens <= 0 {
-			return ErrRateLimited
-		}
-		tokens--
+			if tokens <= 0 {
+				return ErrRateLimited
+			}
+			tokens--
 
-		_, err = tx.TxPipelined(l.ctx, func(p redis.Pipeliner) error {
-			p.HSet(l.ctx, LIMITER_REDIS_TOKENS_KEY, key, tokens)
-			p.HSet(l.ctx, LIMITER_REDIS_LAST_SUCCESSFUL_KEY, key, now)
-			return nil
-		})
+			_, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
+				p.HSet(ctx, redisKey,
+					LIMITER_REDIS_TOKENS_FIELD, tokens,
+					LIMITER_REDIS_LAST_SUCCESSFUL_FIELD, now)
+				return nil
+			})
+			return err
+		}, redisKey)
+		if errors.Is(err, redis.TxFailedErr) && retries < LIMITER_MAX_RETRIES {
+			retries++
+			continue
+		}
 		return err
-	}, LIMITER_REDIS_TOKENS_KEY, LIMITER_REDIS_LAST_SUCCESSFUL_KEY)
+	}
 }
