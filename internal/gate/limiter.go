@@ -3,6 +3,8 @@ package gate
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/mihavo/gct/internal/config"
@@ -44,6 +46,7 @@ func NewLimiter(ctx context.Context, redis *redis.Client, config config.LimiterC
 func (l *Limiter) limit(ctx context.Context, key limiterKey, now time.Time) error {
 	redisKey := LIMITER_REDIS_KEY_PREFIX + key
 	retries := 0
+	remaining := 0
 	for {
 		err := l.redis.Watch(ctx, func(tx *redis.Tx) error {
 			lastSuccessful, err := tx.HGet(ctx, redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD).Time()
@@ -67,9 +70,11 @@ func (l *Limiter) limit(ctx context.Context, key limiterKey, now time.Time) erro
 			}
 
 			if tokens <= 0 {
+				remaining = 0
 				return ErrRateLimited
 			}
 			tokens--
+			remaining = tokens
 
 			_, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
 				p.HSet(ctx, redisKey,
@@ -86,6 +91,22 @@ func (l *Limiter) limit(ctx context.Context, key limiterKey, now time.Time) erro
 			}
 			return ErrRetriesExceeded
 		}
+		if err == nil || errors.Is(err, ErrRateLimited) {
+			capacity := l.config.BucketSize
+			slog.Info("bucket state",
+				"ip", key,
+				"bucket", bucketBar(remaining, capacity),
+				"remaining", remaining,
+				"consumed", capacity-remaining,
+				"capacity", capacity,
+				"allowed", err == nil)
+		}
 		return err
 	}
+}
+
+func bucketBar(remaining, capacity int) string {
+	width := min(capacity, LIMITER_BAR_WIDTH)
+	filled := (remaining*width + capacity - 1) / capacity
+	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
 }

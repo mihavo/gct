@@ -8,4 +8,5 @@ const (
 	LIMITER_REDIS_TOKENS_FIELD          = "tokens"
 	LIMITER_REDIS_LAST_SUCCESSFUL_FIELD = "last_successful"
 	LIMITER_MAX_RETRIES                 = 5
+	LIMITER_BAR_WIDTH                   = 20
 )

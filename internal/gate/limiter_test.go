@@ -1,9 +1,11 @@
 package gate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -423,5 +425,53 @@ func TestLimitRetries(t *testing.T) {
 				t.Fatalf("transactions attempted = %d, want %d", hook.calls, tt.wantAttempts)
 			}
 		})
+	}
+}
+
+func TestBucketBar(t *testing.T) {
+	tests := []struct {
+		remaining, capacity int
+		want                string
+	}{
+		{10, 10, "[██████████]"},
+		{6, 10, "[██████░░░░]"},
+		{0, 10, "[░░░░░░░░░░]"},
+		{1, 3, "[█░░]"},
+		{500, 500, "[" + strings.Repeat("█", LIMITER_BAR_WIDTH) + "]"},
+		{1, 500, "[█" + strings.Repeat("░", LIMITER_BAR_WIDTH-1) + "]"},
+		{250, 500, "[" + strings.Repeat("█", LIMITER_BAR_WIDTH/2) + strings.Repeat("░", LIMITER_BAR_WIDTH/2) + "]"},
+	}
+	for _, tt := range tests {
+		if got := bucketBar(tt.remaining, tt.capacity); got != tt.want {
+			t.Errorf("bucketBar(%d, %d) = %q, want %q", tt.remaining, tt.capacity, got, tt.want)
+		}
+	}
+}
+
+func TestLimitLogsBucketState(t *testing.T) {
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	l, _ := mustLimiter(t, 3, 1, time.Hour)
+	for range 4 {
+		l.limit(context.Background(), "10.0.0.1", epoch)
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("got %d log lines, want 4 (one per request):\n%s", len(lines), buf.String())
+	}
+	want := []string{
+		`ip=10.0.0.1 bucket=[██░] remaining=2 consumed=1 capacity=3 allowed=true`,
+		`ip=10.0.0.1 bucket=[█░░] remaining=1 consumed=2 capacity=3 allowed=true`,
+		`ip=10.0.0.1 bucket=[░░░] remaining=0 consumed=3 capacity=3 allowed=true`,
+		`ip=10.0.0.1 bucket=[░░░] remaining=0 consumed=3 capacity=3 allowed=false`,
+	}
+	for i, line := range lines {
+		if !strings.Contains(line, want[i]) {
+			t.Errorf("line %d = %q, want it to contain %q", i, line, want[i])
+		}
 	}
 }
