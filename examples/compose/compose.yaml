@@ -16,14 +16,24 @@ services:
       - "8080:8080"
     stop_grace_period: 10s
     depends_on:
-      - auth
-      - service1
-      - users
-      - orders
-      - payments
-      - search
-      - inventory
-      - billing
+      redis:
+        condition: service_healthy
+      auth:
+        condition: service_started
+      service1:
+        condition: service_started
+      users:
+        condition: service_started
+      orders:
+        condition: service_started
+      payments:
+        condition: service_started
+      search:
+        condition: service_started
+      inventory:
+        condition: service_started
+      billing:
+        condition: service_started
 
   checker:
     build:

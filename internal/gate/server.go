@@ -57,7 +57,7 @@ func NewGate(ctx context.Context, redis *redis.Client, config config.GateConfig)
 
 	var handler http.Handler = NewHanlder(&routes)
 
-	limiter, err := NewLimiter(redis, config.Limiter)
+	limiter, err := NewLimiter(ctx, redis, config.Limiter)
 
 	if err != nil {
 		return nil, err

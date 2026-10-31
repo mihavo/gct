@@ -29,8 +29,11 @@ func main() {
 	slog.Debug("gate config loaded: %+v", "config", gateConfig)
 
 	redis := buildRedisInstance()
+	defer redis.Close()
 
-	gate, err := gate.NewGate(ctx, redis, *gateConfig)
+	startupCtx, cancelStartup := context.WithTimeout(ctx, 5*time.Second)
+	gate, err := gate.NewGate(startupCtx, redis, *gateConfig)
+	cancelStartup()
 	if err != nil {
 		log.Fatalf("gate init failed: %v", err)
 	}

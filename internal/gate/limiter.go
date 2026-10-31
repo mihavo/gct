@@ -16,17 +16,12 @@ type Limiter struct {
 
 type limiterKey = string
 
-type limiterState struct {
-	tokens         int
-	lastSuccessful time.Time
-}
-
 type RefillRate struct {
 	tokens int
 	per    time.Duration
 }
 
-func NewLimiter(redis *redis.Client, config config.LimiterConfig) (*Limiter, error) {
+func NewLimiter(ctx context.Context, redis *redis.Client, config config.LimiterConfig) (*Limiter, error) {
 	if config.BucketSize <= 0 {
 		return nil, errors.New("bucket size should be greater than zero")
 	}
@@ -36,7 +31,10 @@ func NewLimiter(redis *redis.Client, config config.LimiterConfig) (*Limiter, err
 	if config.RefillRate.Per <= 0 {
 		return nil, errors.New("refill tokens interval should be greater than zero")
 	}
-
+	err := redis.Ping(ctx).Err()
+	if err != nil {
+		return nil, err
+	}
 	return &Limiter{
 		redis:  redis,
 		config: config,
@@ -81,11 +79,11 @@ func (l *Limiter) limit(ctx context.Context, key limiterKey, now time.Time) erro
 			})
 			return err
 		}, redisKey)
-		if errors.Is(err, redis.TxFailedErr) && retries < LIMITER_MAX_RETRIES {
-			retries++
-			continue
-		}
-		if retries == LIMITER_MAX_RETRIES {
+		if errors.Is(err, redis.TxFailedErr) {
+			if retries < LIMITER_MAX_RETRIES {
+				retries++
+				continue
+			}
 			return ErrRetriesExceeded
 		}
 		return err

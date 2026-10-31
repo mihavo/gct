@@ -35,7 +35,7 @@ func newClient(t *testing.T, addr string) *redis.Client {
 func mustLimiter(t *testing.T, size, tokens int, per time.Duration) (*Limiter, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
-	l, err := NewLimiter(newClient(t, mr.Addr()), limiterConfig(size, tokens, per))
+	l, err := NewLimiter(context.Background(), newClient(t, mr.Addr()), limiterConfig(size, tokens, per))
 	if err != nil {
 		t.Fatalf("NewLimiter: %v", err)
 	}
@@ -59,7 +59,8 @@ func TestNewLimiterValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l, err := NewLimiter(newClient(t, "localhost:0"), tt.config)
+			mr := miniredis.RunT(t)
+			l, err := NewLimiter(context.Background(), newClient(t, mr.Addr()), tt.config)
 			if tt.wantErr == "" {
 				if err != nil || l == nil {
 					t.Fatalf("want a limiter, got %v, %v", l, err)
@@ -254,7 +255,7 @@ func TestLimitDeniedRequestWritesNothing(t *testing.T) {
 
 func TestLimitSurvivesAnotherInstance(t *testing.T) {
 	first, mr := mustLimiter(t, 3, 1, time.Hour)
-	second, err := NewLimiter(newClient(t, mr.Addr()), limiterConfig(3, 1, time.Hour))
+	second, err := NewLimiter(context.Background(), newClient(t, mr.Addr()), limiterConfig(3, 1, time.Hour))
 	if err != nil {
 		t.Fatalf("second NewLimiter: %v", err)
 	}
@@ -351,4 +352,76 @@ func TestLimitConcurrent(t *testing.T) {
 		t.Fatalf("stored tokens = %d, want %d (bucket size %d minus %d allowed); an update was lost", stored, want, size, allowed)
 	}
 	t.Logf("shared key: %d allowed, %d requests gave up after %d retries", allowed, conflicts.Load(), LIMITER_MAX_RETRIES)
+}
+
+type failingExec struct {
+	failures int
+	calls    int
+	onFail   func(call int)
+}
+
+func (f *failingExec) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (f *failingExec) ProcessHook(next redis.ProcessHook) redis.ProcessHook { return next }
+
+func (f *failingExec) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		f.calls++
+		if f.calls <= f.failures {
+			if f.onFail != nil {
+				f.onFail(f.calls)
+			}
+			return redis.TxFailedErr
+		}
+		return next(ctx, cmds)
+	}
+}
+
+func TestLimitRetries(t *testing.T) {
+	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
+	maxAttempts := LIMITER_MAX_RETRIES + 1
+
+	tests := []struct {
+		name         string
+		failures     int
+		drainOnFail  int
+		wantErr      error
+		wantAttempts int
+		wantTokens   string
+	}{
+		{"conflicts below the cap are retried", 2, 0, nil, 3, "0"},
+		{"success on the last allowed attempt is not reported as a failure", LIMITER_MAX_RETRIES, 0, nil, maxAttempts, "0"},
+		{"conflicts on every attempt give up", maxAttempts, 0, ErrRetriesExceeded, maxAttempts, "1"},
+		{"a denial on the last allowed attempt is still a denial", LIMITER_MAX_RETRIES, LIMITER_MAX_RETRIES, ErrRateLimited, LIMITER_MAX_RETRIES, "0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, mr := mustLimiter(t, 2, 1, time.Hour)
+			if err := l.limit(context.Background(), "a", epoch); err != nil {
+				t.Fatalf("first request: %v", err)
+			}
+
+			hook := &failingExec{failures: tt.failures}
+			if tt.drainOnFail > 0 {
+				hook.onFail = func(call int) {
+					if call == tt.drainOnFail {
+						mr.HSet(redisKey, LIMITER_REDIS_TOKENS_FIELD, "0")
+					}
+				}
+			}
+			l.redis.AddHook(hook)
+
+			err := l.limit(context.Background(), "a", epoch)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if got := mr.HGet(redisKey, LIMITER_REDIS_TOKENS_FIELD); got != tt.wantTokens {
+				t.Fatalf("stored tokens = %q, want %q", got, tt.wantTokens)
+			}
+			if hook.calls != tt.wantAttempts {
+				t.Fatalf("transactions attempted = %d, want %d", hook.calls, tt.wantAttempts)
+			}
+		})
+	}
 }
