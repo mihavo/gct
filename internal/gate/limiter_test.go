@@ -37,6 +37,7 @@ func newClient(t *testing.T, addr string) *redis.Client {
 func mustLimiter(t *testing.T, size, tokens int, per time.Duration) (*Limiter, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
+	mr.SetTime(epoch)
 	l, err := NewLimiter(context.Background(), newClient(t, mr.Addr()), limiterConfig(size, tokens, per))
 	if err != nil {
 		t.Fatalf("NewLimiter: %v", err)
@@ -196,9 +197,10 @@ func TestLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l, _ := mustLimiter(t, tt.size, tt.tokens, tt.per)
+			l, mr := mustLimiter(t, tt.size, tt.tokens, tt.per)
 			for i, s := range tt.steps {
-				err := l.limit(context.Background(), s.key, epoch.Add(s.at))
+				mr.SetTime(epoch.Add(s.at))
+				err := l.limit(context.Background(), s.key)
 				if err != nil && !errors.Is(err, ErrRateLimited) {
 					t.Fatalf("step %d (key %q at +%s): unexpected error %v", i, s.key, s.at, err)
 				}
@@ -215,11 +217,11 @@ func TestLimitStoresOneHashPerCaller(t *testing.T) {
 	ctx := context.Background()
 
 	for _, key := range []string{"a", "b"} {
-		if err := l.limit(ctx, key, epoch); err != nil {
+		if err := l.limit(ctx, key); err != nil {
 			t.Fatalf("limit(%q): %v", key, err)
 		}
 	}
-	if err := l.limit(ctx, "b", epoch); err != nil {
+	if err := l.limit(ctx, "b"); err != nil {
 		t.Fatalf("second limit(b): %v", err)
 	}
 
@@ -242,12 +244,13 @@ func TestLimitDeniedRequestWritesNothing(t *testing.T) {
 	ctx := context.Background()
 	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
 
-	if err := l.limit(ctx, "a", epoch); err != nil {
+	if err := l.limit(ctx, "a"); err != nil {
 		t.Fatalf("first request: %v", err)
 	}
 	before := mr.HGet(redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD)
 
-	if err := l.limit(ctx, "a", epoch.Add(time.Minute)); !errors.Is(err, ErrRateLimited) {
+	mr.SetTime(epoch.Add(time.Minute))
+	if err := l.limit(ctx, "a"); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("second request: err = %v, want ErrRateLimited", err)
 	}
 	if after := mr.HGet(redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD); after != before {
@@ -264,12 +267,12 @@ func TestLimitSurvivesAnotherInstance(t *testing.T) {
 
 	ctx := context.Background()
 	for i, l := range []*Limiter{first, second, first} {
-		if err := l.limit(ctx, "shared", epoch); err != nil {
+		if err := l.limit(ctx, "shared"); err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
 	}
 	for i, l := range []*Limiter{second, first} {
-		if err := l.limit(ctx, "shared", epoch); !errors.Is(err, ErrRateLimited) {
+		if err := l.limit(ctx, "shared"); !errors.Is(err, ErrRateLimited) {
 			t.Fatalf("request %d after the bucket is empty: err = %v, want ErrRateLimited", i+3, err)
 		}
 	}
@@ -282,7 +285,7 @@ func TestLimitReturnsRedisFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := l.limit(ctx, "a", epoch)
+	err := l.limit(ctx, "a")
 	if err == nil {
 		t.Fatal("want an error when redis is down, got none")
 	}
@@ -308,7 +311,7 @@ func TestLimitConcurrent(t *testing.T) {
 			<-start
 			own := fmt.Sprintf("own-%d", g)
 			for {
-				err := l.limit(ctx, own, epoch)
+				err := l.limit(ctx, own)
 				if errors.Is(err, ErrRetriesExceeded) {
 					continue
 				}
@@ -320,7 +323,7 @@ func TestLimitConcurrent(t *testing.T) {
 				break
 			}
 			for range perRoutine {
-				switch err := l.limit(ctx, "shared", epoch); {
+				switch err := l.limit(ctx, "shared"); {
 				case err == nil:
 					allowedShared.Add(1)
 				case errors.Is(err, ErrRateLimited):
@@ -400,7 +403,7 @@ func TestLimitRetries(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			l, mr := mustLimiter(t, 2, 1, time.Hour)
-			if err := l.limit(context.Background(), "a", epoch); err != nil {
+			if err := l.limit(context.Background(), "a"); err != nil {
 				t.Fatalf("first request: %v", err)
 			}
 
@@ -414,7 +417,7 @@ func TestLimitRetries(t *testing.T) {
 			}
 			l.redis.AddHook(hook)
 
-			err := l.limit(context.Background(), "a", epoch)
+			err := l.limit(context.Background(), "a")
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
@@ -456,7 +459,7 @@ func TestLimitLogsBucketState(t *testing.T) {
 
 	l, _ := mustLimiter(t, 3, 1, time.Hour)
 	for range 4 {
-		l.limit(context.Background(), "10.0.0.1", epoch)
+		l.limit(context.Background(), "10.0.0.1")
 	}
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
@@ -473,5 +476,113 @@ func TestLimitLogsBucketState(t *testing.T) {
 		if !strings.Contains(line, want[i]) {
 			t.Errorf("line %d = %q, want it to contain %q", i, line, want[i])
 		}
+	}
+}
+
+func TestLimitUsesTheRedisClock(t *testing.T) {
+	l, mr := mustLimiter(t, 3, 1, time.Second)
+	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
+
+	for _, at := range []time.Time{epoch, epoch.Add(2 * time.Hour)} {
+		mr.SetTime(at)
+		if err := l.limit(context.Background(), "a"); err != nil {
+			t.Fatalf("limit at %s: %v", at, err)
+		}
+		stored, err := time.Parse(time.RFC3339Nano, mr.HGet(redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD))
+		if err != nil {
+			t.Fatalf("parsing last successful time: %v", err)
+		}
+		if !stored.Equal(at) {
+			t.Fatalf("last successful = %s, want the redis time %s", stored, at)
+		}
+	}
+}
+
+func TestLimitSetsTTLToAFullRefill(t *testing.T) {
+	tests := []struct {
+		name    string
+		size    int
+		tokens  int
+		per     time.Duration
+		wantTTL time.Duration
+	}{
+		{"one token per interval", 10, 1, time.Second, 10 * time.Second},
+		{"a partial last interval rounds up", 10, 3, time.Second, 4 * time.Second},
+		{"tokens above the bucket size need one interval", 2, 10, time.Minute, time.Minute},
+		{"sub-second interval", 3, 1, 250 * time.Millisecond, 750 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, mr := mustLimiter(t, tt.size, tt.tokens, tt.per)
+			if err := l.limit(context.Background(), "a"); err != nil {
+				t.Fatalf("limit: %v", err)
+			}
+			if got := mr.TTL(LIMITER_REDIS_KEY_PREFIX + "a"); got != tt.wantTTL {
+				t.Fatalf("ttl = %s, want %s", got, tt.wantTTL)
+			}
+		})
+	}
+}
+
+func TestLimitRenewsTTLOnlyOnAllowedRequests(t *testing.T) {
+	ctx := context.Background()
+	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
+
+	t.Run("an allowed request restarts the countdown", func(t *testing.T) {
+		l, mr := mustLimiter(t, 5, 1, time.Second)
+		if err := l.limit(ctx, "a"); err != nil {
+			t.Fatalf("first request: %v", err)
+		}
+		mr.FastForward(3 * time.Second)
+		if got := mr.TTL(redisKey); got != 2*time.Second {
+			t.Fatalf("ttl after 3s = %s, want 2s", got)
+		}
+		if err := l.limit(ctx, "a"); err != nil {
+			t.Fatalf("second request: %v", err)
+		}
+		if got := mr.TTL(redisKey); got != 5*time.Second {
+			t.Fatalf("ttl after an allowed request = %s, want 5s", got)
+		}
+	})
+
+	t.Run("a denied request leaves the countdown alone", func(t *testing.T) {
+		l, mr := mustLimiter(t, 1, 1, time.Hour)
+		if err := l.limit(ctx, "a"); err != nil {
+			t.Fatalf("first request: %v", err)
+		}
+		mr.FastForward(10 * time.Minute)
+		if err := l.limit(ctx, "a"); !errors.Is(err, ErrRateLimited) {
+			t.Fatalf("second request: err = %v, want ErrRateLimited", err)
+		}
+		if got := mr.TTL(redisKey); got != 50*time.Minute {
+			t.Fatalf("ttl after a denied request = %s, want 50m", got)
+		}
+	})
+}
+
+func TestLimitExpiredKeyActsLikeAFullBucket(t *testing.T) {
+	l, mr := mustLimiter(t, 2, 1, time.Second)
+	ctx := context.Background()
+	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
+
+	for i := range 2 {
+		if err := l.limit(ctx, "a"); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+	if err := l.limit(ctx, "a"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("empty bucket: err = %v, want ErrRateLimited", err)
+	}
+
+	mr.FastForward(2 * time.Second)
+	if mr.Exists(redisKey) {
+		t.Fatal("key still exists after a full refill time")
+	}
+	if err := l.limit(ctx, "a"); err != nil {
+		t.Fatalf("request after expiry: %v", err)
+	}
+	if got := mr.HGet(redisKey, LIMITER_REDIS_TOKENS_FIELD); got != "1" {
+		t.Fatalf("tokens after expiry and one request = %q, want 1", got)
 	}
 }

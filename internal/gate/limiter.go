@@ -14,6 +14,7 @@ import (
 type Limiter struct {
 	redis  *redis.Client
 	config config.LimiterConfig
+	ttl    time.Duration
 }
 
 type limiterKey = string
@@ -37,18 +38,25 @@ func NewLimiter(ctx context.Context, redis *redis.Client, config config.LimiterC
 	if err != nil {
 		return nil, err
 	}
+	fullRefillIntervals := (config.BucketSize + config.RefillRate.Tokens - 1) / config.RefillRate.Tokens
 	return &Limiter{
 		redis:  redis,
 		config: config,
+		ttl:    time.Duration(fullRefillIntervals) * config.RefillRate.Per,
 	}, nil
 }
 
-func (l *Limiter) limit(ctx context.Context, key limiterKey, now time.Time) error {
+func (l *Limiter) limit(ctx context.Context, key limiterKey) error {
 	redisKey := LIMITER_REDIS_KEY_PREFIX + key
 	retries := 0
 	remaining := 0
 	for {
 		err := l.redis.Watch(ctx, func(tx *redis.Tx) error {
+			now, err := tx.Time(ctx).Result()
+			if err != nil {
+				return err
+			}
+
 			lastSuccessful, err := tx.HGet(ctx, redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD).Time()
 			tokens := l.config.BucketSize
 
@@ -80,6 +88,7 @@ func (l *Limiter) limit(ctx context.Context, key limiterKey, now time.Time) erro
 				p.HSet(ctx, redisKey,
 					LIMITER_REDIS_TOKENS_FIELD, tokens,
 					LIMITER_REDIS_LAST_SUCCESSFUL_FIELD, now)
+				p.PExpire(ctx, redisKey, l.ttl)
 				return nil
 			})
 			return err

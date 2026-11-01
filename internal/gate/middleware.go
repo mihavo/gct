@@ -35,7 +35,7 @@ func (l *LimiterMiddleware) Process(next http.Handler) http.Handler {
 			appjson.WriteError(w, message, http.StatusInternalServerError)
 			return
 		}
-		err = l.limiter.limit(r.Context(), ip, time.Now())
+		err = l.limiter.limit(r.Context(), ip)
 		if err != nil {
 			if errors.Is(err, ErrRetriesExceeded) || errors.Is(err, ErrRateLimited) {
 				slog.Debug("request denied by rate limiter", "error", err, "ip", ip, "method", r.Method, "path", r.URL.Path)
