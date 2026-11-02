@@ -99,6 +99,55 @@ func TestLimiterMiddlewareSharesABucketAcrossPorts(t *testing.T) {
 	}
 }
 
+func TestLimiterMiddlewareTreatsEquivalentAddressesAsOneCaller(t *testing.T) {
+	tests := []struct {
+		name  string
+		first string
+		same  string
+		key   string
+	}{
+		{"ipv4-mapped ipv6", "10.0.0.1:1111", "[::ffff:10.0.0.1]:2222", redisKeyPrefix + "10.0.0.1"},
+		{"ipv6 spelling", "[2001:db8::1]:1111", "[2001:0db8:0:0:0:0:0:1]:2222", redisKeyPrefix + "2001:db8::1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, mr := mustLimiter(t, 1, 1, time.Hour)
+			h, _ := limiterHandler(t, l)
+
+			if rec := serve(h, tt.first); rec.Code != http.StatusOK {
+				t.Fatalf("first request: status = %d, want 200", rec.Code)
+			}
+			if rec := serve(h, tt.same); rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("equivalent address: status = %d, want 429", rec.Code)
+			}
+			if got := mr.Keys(); len(got) != 1 || got[0] != tt.key {
+				t.Fatalf("keys = %v, want exactly [%s]", got, tt.key)
+			}
+		})
+	}
+}
+
+func TestLimiterMiddlewareRejectsAHostThatIsNotAnIP(t *testing.T) {
+	l, mr := mustLimiter(t, 3, 1, time.Hour)
+	h, calls := limiterHandler(t, l)
+
+	rec := serve(h, "example.com:8080")
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if got := errorBody(t, rec); got != "unexpected error" {
+		t.Fatalf("error body = %q, want the generic message", got)
+	}
+	if *calls != 0 {
+		t.Fatalf("next handler ran %d times, want 0", *calls)
+	}
+	if got := mr.Keys(); len(got) != 0 {
+		t.Fatalf("keys = %v, want none written for a host that is not an IP", got)
+	}
+}
+
 func TestLimiterMiddlewareRejectsAnAddressWithoutAPort(t *testing.T) {
 	l, mr := mustLimiter(t, 3, 1, time.Hour)
 	h, calls := limiterHandler(t, l)

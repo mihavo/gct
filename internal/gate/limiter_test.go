@@ -229,11 +229,11 @@ func TestLimitStoresOneHashPerCaller(t *testing.T) {
 		t.Fatalf("keys = %v, want one hash per caller", got)
 	}
 	for key, want := range map[string]string{"a": "4", "b": "3"} {
-		redisKey := LIMITER_REDIS_KEY_PREFIX + key
-		if got := mr.HGet(redisKey, LIMITER_REDIS_TOKENS_FIELD); got != want {
+		redisKey := redisKeyPrefix + key
+		if got := mr.HGet(redisKey, tokensField); got != want {
 			t.Fatalf("%s: tokens = %q, want %q", redisKey, got, want)
 		}
-		if got := mr.HGet(redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD); got == "" {
+		if got := mr.HGet(redisKey, lastSuccessfulField); got == "" {
 			t.Fatalf("%s: last successful time is missing", redisKey)
 		}
 	}
@@ -242,18 +242,18 @@ func TestLimitStoresOneHashPerCaller(t *testing.T) {
 func TestLimitDeniedRequestWritesNothing(t *testing.T) {
 	l, mr := mustLimiter(t, 1, 1, time.Hour)
 	ctx := context.Background()
-	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
+	redisKey := redisKeyPrefix + "a"
 
 	if err := l.limit(ctx, "a"); err != nil {
 		t.Fatalf("first request: %v", err)
 	}
-	before := mr.HGet(redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD)
+	before := mr.HGet(redisKey, lastSuccessfulField)
 
 	mr.SetTime(epoch.Add(time.Minute))
 	if err := l.limit(ctx, "a"); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("second request: err = %v, want ErrRateLimited", err)
 	}
-	if after := mr.HGet(redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD); after != before {
+	if after := mr.HGet(redisKey, lastSuccessfulField); after != before {
 		t.Fatalf("last successful time changed from %q to %q on a denied request", before, after)
 	}
 }
@@ -349,14 +349,14 @@ func TestLimitConcurrent(t *testing.T) {
 	if allowed > size {
 		t.Fatalf("shared key: allowed %d requests, more than the bucket size %d", allowed, size)
 	}
-	stored, err := strconv.Atoi(mr.HGet(LIMITER_REDIS_KEY_PREFIX+"shared", LIMITER_REDIS_TOKENS_FIELD))
+	stored, err := strconv.Atoi(mr.HGet(redisKeyPrefix+"shared", tokensField))
 	if err != nil {
 		t.Fatalf("stored tokens: %v", err)
 	}
 	if want := size - int(allowed); stored != want {
 		t.Fatalf("stored tokens = %d, want %d (bucket size %d minus %d allowed); an update was lost", stored, want, size, allowed)
 	}
-	t.Logf("shared key: %d allowed, %d requests gave up after %d retries", allowed, conflicts.Load(), LIMITER_MAX_RETRIES)
+	t.Logf("shared key: %d allowed, %d requests gave up after %d retries", allowed, conflicts.Load(), maxRetries)
 }
 
 type failingExec struct {
@@ -383,8 +383,8 @@ func (f *failingExec) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.
 }
 
 func TestLimitRetries(t *testing.T) {
-	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
-	maxAttempts := LIMITER_MAX_RETRIES + 1
+	redisKey := redisKeyPrefix + "a"
+	maxAttempts := maxRetries + 1
 
 	tests := []struct {
 		name         string
@@ -395,9 +395,9 @@ func TestLimitRetries(t *testing.T) {
 		wantTokens   string
 	}{
 		{"conflicts below the cap are retried", 2, 0, nil, 3, "0"},
-		{"success on the last allowed attempt is not reported as a failure", LIMITER_MAX_RETRIES, 0, nil, maxAttempts, "0"},
+		{"success on the last allowed attempt is not reported as a failure", maxRetries, 0, nil, maxAttempts, "0"},
 		{"conflicts on every attempt give up", maxAttempts, 0, ErrRetriesExceeded, maxAttempts, "1"},
-		{"a denial on the last allowed attempt is still a denial", LIMITER_MAX_RETRIES, LIMITER_MAX_RETRIES, ErrRateLimited, LIMITER_MAX_RETRIES, "0"},
+		{"a denial on the last allowed attempt is still a denial", maxRetries, maxRetries, ErrRateLimited, maxRetries, "0"},
 	}
 
 	for _, tt := range tests {
@@ -411,7 +411,7 @@ func TestLimitRetries(t *testing.T) {
 			if tt.drainOnFail > 0 {
 				hook.onFail = func(call int) {
 					if call == tt.drainOnFail {
-						mr.HSet(redisKey, LIMITER_REDIS_TOKENS_FIELD, "0")
+						mr.HSet(redisKey, tokensField, "0")
 					}
 				}
 			}
@@ -421,7 +421,7 @@ func TestLimitRetries(t *testing.T) {
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
-			if got := mr.HGet(redisKey, LIMITER_REDIS_TOKENS_FIELD); got != tt.wantTokens {
+			if got := mr.HGet(redisKey, tokensField); got != tt.wantTokens {
 				t.Fatalf("stored tokens = %q, want %q", got, tt.wantTokens)
 			}
 			if hook.calls != tt.wantAttempts {
@@ -440,9 +440,9 @@ func TestBucketBar(t *testing.T) {
 		{6, 10, "[██████░░░░]"},
 		{0, 10, "[░░░░░░░░░░]"},
 		{1, 3, "[█░░]"},
-		{500, 500, "[" + strings.Repeat("█", LIMITER_BAR_WIDTH) + "]"},
-		{1, 500, "[█" + strings.Repeat("░", LIMITER_BAR_WIDTH-1) + "]"},
-		{250, 500, "[" + strings.Repeat("█", LIMITER_BAR_WIDTH/2) + strings.Repeat("░", LIMITER_BAR_WIDTH/2) + "]"},
+		{500, 500, "[" + strings.Repeat("█", barWidth) + "]"},
+		{1, 500, "[█" + strings.Repeat("░", barWidth-1) + "]"},
+		{250, 500, "[" + strings.Repeat("█", barWidth/2) + strings.Repeat("░", barWidth/2) + "]"},
 	}
 	for _, tt := range tests {
 		if got := bucketBar(tt.remaining, tt.capacity); got != tt.want {
@@ -481,14 +481,14 @@ func TestLimitLogsBucketState(t *testing.T) {
 
 func TestLimitUsesTheRedisClock(t *testing.T) {
 	l, mr := mustLimiter(t, 3, 1, time.Second)
-	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
+	redisKey := redisKeyPrefix + "a"
 
 	for _, at := range []time.Time{epoch, epoch.Add(2 * time.Hour)} {
 		mr.SetTime(at)
 		if err := l.limit(context.Background(), "a"); err != nil {
 			t.Fatalf("limit at %s: %v", at, err)
 		}
-		stored, err := time.Parse(time.RFC3339Nano, mr.HGet(redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD))
+		stored, err := time.Parse(time.RFC3339Nano, mr.HGet(redisKey, lastSuccessfulField))
 		if err != nil {
 			t.Fatalf("parsing last successful time: %v", err)
 		}
@@ -518,7 +518,7 @@ func TestLimitSetsTTLToAFullRefill(t *testing.T) {
 			if err := l.limit(context.Background(), "a"); err != nil {
 				t.Fatalf("limit: %v", err)
 			}
-			if got := mr.TTL(LIMITER_REDIS_KEY_PREFIX + "a"); got != tt.wantTTL {
+			if got := mr.TTL(redisKeyPrefix + "a"); got != tt.wantTTL {
 				t.Fatalf("ttl = %s, want %s", got, tt.wantTTL)
 			}
 		})
@@ -527,7 +527,7 @@ func TestLimitSetsTTLToAFullRefill(t *testing.T) {
 
 func TestLimitRenewsTTLOnlyOnAllowedRequests(t *testing.T) {
 	ctx := context.Background()
-	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
+	redisKey := redisKeyPrefix + "a"
 
 	t.Run("an allowed request restarts the countdown", func(t *testing.T) {
 		l, mr := mustLimiter(t, 5, 1, time.Second)
@@ -564,7 +564,7 @@ func TestLimitRenewsTTLOnlyOnAllowedRequests(t *testing.T) {
 func TestLimitExpiredKeyActsLikeAFullBucket(t *testing.T) {
 	l, mr := mustLimiter(t, 2, 1, time.Second)
 	ctx := context.Background()
-	redisKey := LIMITER_REDIS_KEY_PREFIX + "a"
+	redisKey := redisKeyPrefix + "a"
 
 	for i := range 2 {
 		if err := l.limit(ctx, "a"); err != nil {
@@ -582,7 +582,7 @@ func TestLimitExpiredKeyActsLikeAFullBucket(t *testing.T) {
 	if err := l.limit(ctx, "a"); err != nil {
 		t.Fatalf("request after expiry: %v", err)
 	}
-	if got := mr.HGet(redisKey, LIMITER_REDIS_TOKENS_FIELD); got != "1" {
+	if got := mr.HGet(redisKey, tokensField); got != "1" {
 		t.Fatalf("tokens after expiry and one request = %q, want 1", got)
 	}
 }

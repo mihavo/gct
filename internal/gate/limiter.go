@@ -47,7 +47,7 @@ func NewLimiter(ctx context.Context, redis *redis.Client, config config.LimiterC
 }
 
 func (l *Limiter) limit(ctx context.Context, key limiterKey) error {
-	redisKey := LIMITER_REDIS_KEY_PREFIX + key
+	redisKey := redisKeyPrefix + key
 	retries := 0
 	remaining := 0
 	for {
@@ -57,7 +57,7 @@ func (l *Limiter) limit(ctx context.Context, key limiterKey) error {
 				return err
 			}
 
-			lastSuccessful, err := tx.HGet(ctx, redisKey, LIMITER_REDIS_LAST_SUCCESSFUL_FIELD).Time()
+			lastSuccessful, err := tx.HGet(ctx, redisKey, lastSuccessfulField).Time()
 			tokens := l.config.BucketSize
 
 			switch {
@@ -66,7 +66,7 @@ func (l *Limiter) limit(ctx context.Context, key limiterKey) error {
 			case err != nil:
 				return err
 			default:
-				tokens, err = tx.HGet(ctx, redisKey, LIMITER_REDIS_TOKENS_FIELD).Int()
+				tokens, err = tx.HGet(ctx, redisKey, tokensField).Int()
 				if err != nil && !errors.Is(err, redis.Nil) {
 					return err
 				}
@@ -86,15 +86,15 @@ func (l *Limiter) limit(ctx context.Context, key limiterKey) error {
 
 			_, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
 				p.HSet(ctx, redisKey,
-					LIMITER_REDIS_TOKENS_FIELD, tokens,
-					LIMITER_REDIS_LAST_SUCCESSFUL_FIELD, now)
+					tokensField, tokens,
+					lastSuccessfulField, now)
 				p.PExpire(ctx, redisKey, l.ttl)
 				return nil
 			})
 			return err
 		}, redisKey)
 		if errors.Is(err, redis.TxFailedErr) {
-			if retries < LIMITER_MAX_RETRIES {
+			if retries < maxRetries {
 				retries++
 				continue
 			}
@@ -115,7 +115,7 @@ func (l *Limiter) limit(ctx context.Context, key limiterKey) error {
 }
 
 func bucketBar(remaining, capacity int) string {
-	width := min(capacity, LIMITER_BAR_WIDTH)
+	width := min(capacity, barWidth)
 	filled := (remaining*width + capacity - 1) / capacity
 	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
 }

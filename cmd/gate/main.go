@@ -64,20 +64,20 @@ func main() {
 }
 
 func buildRedisInstance() *redis.Client {
-	opts, err := gate.RequireEnv(gate.LIMITER_REDIS_ADDR, gate.LIMITER_REDIS_PASSWORD, gate.LIMITER_REDIS_DB)
+	opts, err := gate.RequireEnv(gate.LimiterRedisAddr, gate.LimiterRedisPassword, gate.LimiterRedisDB)
 
 	if err != nil {
 		log.Fatalf("missing opts for gate limiter %v", err)
 	}
 
-	db, err := strconv.Atoi(opts[gate.LIMITER_REDIS_DB])
+	db, err := strconv.Atoi(opts[gate.LimiterRedisDB])
 	if err != nil {
 		log.Fatalf("Could not parse redis db name option")
 	}
 
 	redis := redis.NewClient(&redis.Options{
-		Addr:     opts[gate.LIMITER_REDIS_ADDR],
-		Password: opts[gate.LIMITER_REDIS_PASSWORD],
+		Addr:     opts[gate.LimiterRedisAddr],
+		Password: opts[gate.LimiterRedisPassword],
 		DB:       db})
 	return redis
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"time"
 	"uuid"
 
@@ -31,18 +32,25 @@ func (l *LimiterMiddleware) Process(next http.Handler) http.Handler {
 		message := "unexpected error"
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
-			slog.Error("error parsing request IP", "error", err, "RemoteAddr", r.RemoteAddr)
+			slog.Error("error splitting host from port", "error", err, "RemoteAddr", r.RemoteAddr)
 			appjson.WriteError(w, message, http.StatusInternalServerError)
 			return
 		}
-		err = l.limiter.limit(r.Context(), ip)
+		addr, err := netip.ParseAddr(ip)
+		if err != nil {
+			slog.Error("error parsing address", "error", err, "RemoteAddr", r.RemoteAddr)
+			appjson.WriteError(w, message, http.StatusInternalServerError)
+			return
+		}
+		callerIP := addr.Unmap().String()
+		err = l.limiter.limit(r.Context(), callerIP)
 		if err != nil {
 			if errors.Is(err, ErrRetriesExceeded) || errors.Is(err, ErrRateLimited) {
-				slog.Debug("request denied by rate limiter", "error", err, "ip", ip, "method", r.Method, "path", r.URL.Path)
+				slog.Debug("request denied by rate limiter", "error", err, "ip", callerIP, "method", r.Method, "path", r.URL.Path)
 				appjson.WriteError(w, err.Error(), http.StatusTooManyRequests)
 				return
 			}
-			slog.Error("rate limiter failed", "error", err, "ip", ip, "method", r.Method, "path", r.URL.Path)
+			slog.Error("rate limiter failed", "error", err, "ip", callerIP, "method", r.Method, "path", r.URL.Path)
 			appjson.WriteError(w, message, http.StatusInternalServerError)
 			return
 		}
