@@ -168,7 +168,7 @@ func TestLimiterMiddlewareRejectsAnAddressWithoutAPort(t *testing.T) {
 	}
 }
 
-func TestLimiterMiddlewareHidesARedisFailure(t *testing.T) {
+func TestLimiterMiddlewareFailsOpenWhenRedisIsDown(t *testing.T) {
 	l, mr := mustLimiter(t, 3, 1, time.Hour)
 	h, calls := limiterHandler(t, l)
 	mr.Close()
@@ -180,13 +180,10 @@ func TestLimiterMiddlewareHidesARedisFailure(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 when the limiter cannot decide", rec.Code)
 	}
-	if got := errorBody(t, rec); got != "unexpected error" {
-		t.Fatalf("error body = %q, want the generic message without the redis error", got)
-	}
-	if *calls != 0 {
-		t.Fatalf("next handler ran %d times, want 0 when the limiter cannot decide", *calls)
+	if *calls != 1 {
+		t.Fatalf("next handler ran %d times, want 1", *calls)
 	}
 }

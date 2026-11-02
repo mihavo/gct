@@ -17,36 +17,29 @@ type Limiter struct {
 	ttl    time.Duration
 }
 
-type limiterKey = string
-
-type RefillRate struct {
-	tokens int
-	per    time.Duration
-}
-
-func NewLimiter(ctx context.Context, redis *redis.Client, config config.LimiterConfig) (*Limiter, error) {
-	if config.BucketSize <= 0 {
+func NewLimiter(ctx context.Context, redisClient *redis.Client, limiterCfg config.LimiterConfig) (*Limiter, error) {
+	if limiterCfg.BucketSize <= 0 {
 		return nil, errors.New("bucket size should be greater than zero")
 	}
-	if config.RefillRate.Tokens <= 0 {
+	if limiterCfg.RefillRate.Tokens <= 0 {
 		return nil, errors.New("refill tokens should be greater than zero")
 	}
-	if config.RefillRate.Per <= 0 {
+	if limiterCfg.RefillRate.Per <= 0 {
 		return nil, errors.New("refill tokens interval should be greater than zero")
 	}
-	err := redis.Ping(ctx).Err()
+	err := redisClient.Ping(ctx).Err()
 	if err != nil {
 		return nil, err
 	}
-	fullRefillIntervals := (config.BucketSize + config.RefillRate.Tokens - 1) / config.RefillRate.Tokens
+	fullRefillIntervals := (limiterCfg.BucketSize + limiterCfg.RefillRate.Tokens - 1) / limiterCfg.RefillRate.Tokens
 	return &Limiter{
-		redis:  redis,
-		config: config,
-		ttl:    time.Duration(fullRefillIntervals) * config.RefillRate.Per,
+		redis:  redisClient,
+		config: limiterCfg,
+		ttl:    time.Duration(fullRefillIntervals) * limiterCfg.RefillRate.Per,
 	}, nil
 }
 
-func (l *Limiter) limit(ctx context.Context, key limiterKey) error {
+func (l *Limiter) limit(ctx context.Context, key string) error {
 	redisKey := redisKeyPrefix + key
 	retries := 0
 	remaining := 0

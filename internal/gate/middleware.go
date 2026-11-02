@@ -43,7 +43,9 @@ func (l *LimiterMiddleware) Process(next http.Handler) http.Handler {
 			return
 		}
 		callerIP := addr.Unmap().String()
-		err = l.limiter.limit(r.Context(), callerIP)
+		ctx, cancel := context.WithTimeout(r.Context(), time.Millisecond*100)
+		defer cancel()
+		err = l.limiter.limit(ctx, callerIP)
 		if err != nil {
 			if errors.Is(err, ErrRetriesExceeded) || errors.Is(err, ErrRateLimited) {
 				slog.Debug("request denied by rate limiter", "error", err, "ip", callerIP, "method", r.Method, "path", r.URL.Path)
@@ -51,8 +53,6 @@ func (l *LimiterMiddleware) Process(next http.Handler) http.Handler {
 				return
 			}
 			slog.Error("rate limiter failed", "error", err, "ip", callerIP, "method", r.Method, "path", r.URL.Path)
-			appjson.WriteError(w, message, http.StatusInternalServerError)
-			return
 		}
 		next.ServeHTTP(w, r)
 	})

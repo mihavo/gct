@@ -44,20 +44,20 @@ type Route struct {
 	Proxy    *httputil.ReverseProxy
 }
 
-func NewGate(ctx context.Context, redis *redis.Client, config config.GateConfig) (*Gate, error) {
+func NewGate(ctx context.Context, redisClient *redis.Client, gateConfig config.GateConfig) (*Gate, error) {
 
-	if len(config.Routes) == 0 {
-		return nil, errors.New("No routes declared")
+	if len(gateConfig.Routes) == 0 {
+		return nil, errors.New("no routes declared")
 	}
 
-	routes, err := buildRoutingTable(config.Routes)
+	routes, err := buildRoutingTable(gateConfig.Routes)
 	if err != nil {
 		return nil, err
 	}
 
 	var handler http.Handler = NewHanlder(&routes)
 
-	limiter, err := NewLimiter(ctx, redis, config.Limiter)
+	limiter, err := NewLimiter(ctx, redisClient, gateConfig.Limiter)
 
 	if err != nil {
 		return nil, err
@@ -69,12 +69,12 @@ func NewGate(ctx context.Context, redis *redis.Client, config config.GateConfig)
 		&LimiterMiddleware{limiter: limiter})
 
 	server := http.Server{
-		Addr:    net.JoinHostPort(config.Server.ListenAddress, strconv.Itoa(config.Server.Port)),
+		Addr:    net.JoinHostPort(gateConfig.Server.ListenAddress, strconv.Itoa(gateConfig.Server.Port)),
 		Handler: handler,
 	}
 
 	return &Gate{
-		Config: config,
+		Config: gateConfig,
 		Server: &server,
 	}, nil
 }

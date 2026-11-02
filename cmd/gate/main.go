@@ -28,23 +28,23 @@ func main() {
 	}
 	slog.Debug("gate config loaded: %+v", "config", gateConfig)
 
-	redis := buildRedisInstance()
-	defer redis.Close()
+	redisClient := buildRedisInstance()
+	defer redisClient.Close()
 
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 5*time.Second)
-	gate, err := gate.NewGate(startupCtx, redis, *gateConfig)
+	gateInstance, err := gate.NewGate(startupCtx, redisClient, *gateConfig)
 	cancelStartup()
 	if err != nil {
 		log.Fatalf("gate init failed: %v", err)
 	}
-	slog.Debug("Gate: ", "gate", gate)
+	slog.Debug("Gate: ", "gate", gateInstance)
 
 	notifyCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- gate.Server.ListenAndServe()
+		errCh <- gateInstance.Server.ListenAndServe()
 	}()
 
 	select {
@@ -54,7 +54,7 @@ func main() {
 		stop()
 		shutdownCtx, stop := context.WithTimeout(ctx, time.Duration(8*time.Second))
 		defer stop()
-		err := gate.Server.Shutdown(shutdownCtx)
+		err := gateInstance.Server.Shutdown(shutdownCtx)
 		if err != nil {
 			log.Fatalf("could not shutdown gate server gracefully %v", err)
 			return
@@ -72,12 +72,12 @@ func buildRedisInstance() *redis.Client {
 
 	db, err := strconv.Atoi(opts[gate.LimiterRedisDB])
 	if err != nil {
-		log.Fatalf("Could not parse redis db name option")
+		log.Fatalf("could not parse redis db option: %v", err)
 	}
 
-	redis := redis.NewClient(&redis.Options{
+	client := redis.NewClient(&redis.Options{
 		Addr:     opts[gate.LimiterRedisAddr],
 		Password: opts[gate.LimiterRedisPassword],
 		DB:       db})
-	return redis
+	return client
 }

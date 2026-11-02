@@ -13,6 +13,7 @@ func newEchoUpstream(t *testing.T, name string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Seen-Path", r.URL.Path)
+		w.Header().Set("X-Seen-Escaped-Path", r.URL.EscapedPath())
 		w.Header().Set("X-Seen-Query", r.URL.RawQuery)
 		w.Header().Set("X-Seen-Prefix", r.Header.Get("X-Forwarded-Prefix"))
 		w.Header().Set("X-Seen-Forwarded-For", r.Header.Get("X-Forwarded-For"))
@@ -21,6 +22,51 @@ func newEchoUpstream(t *testing.T, name string) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func TestForwardKeepsEncodedSlashes(t *testing.T) {
+	auth := newEchoUpstream(t, "auth")
+	service1 := newEchoUpstream(t, "service1")
+
+	table, err := buildRoutingTable([]config.RoutesConfig{
+		{Name: "auth", Prefix: "/auth", Location: auth.URL},
+		{Name: "service1", Prefix: "/service1", Location: service1.URL + "/v1"},
+	})
+	if err != nil {
+		t.Fatalf("building routing table: %v", err)
+	}
+	h := (&LoggingMiddleware{}).Process(&Handler{Routes: &table})
+
+	tests := []struct {
+		name        string
+		target      string
+		wantPath    string
+		wantEscaped string
+	}{
+		{"encoded slash in a segment", "/auth/files/a%2Fb", "/files/a/b", "/files/a%2Fb"},
+		{"encoded slash with an upstream base path", "/service1/items/a%2Fb", "/v1/items/a/b", "/v1/items/a%2Fb"},
+		{"other escapes survive", "/auth/files/a%20b", "/files/a b", "/files/a%20b"},
+		{"plain path unchanged", "/auth/login", "/login", "/login"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.target, nil))
+
+			res := rec.Result()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("GET %s status = %d, want 200", tt.target, res.StatusCode)
+			}
+			if got := res.Header.Get("X-Seen-Path"); got != tt.wantPath {
+				t.Errorf("GET %s upstream path = %q, want %q", tt.target, got, tt.wantPath)
+			}
+			if got := res.Header.Get("X-Seen-Escaped-Path"); got != tt.wantEscaped {
+				t.Errorf("GET %s upstream escaped path = %q, want %q", tt.target, got, tt.wantEscaped)
+			}
+		})
+	}
 }
 
 func TestForward(t *testing.T) {

@@ -55,8 +55,8 @@ func buildRoutingTable(configs []config.RoutesConfig) (RoutingTable, error) {
 func buildProxy(config config.RoutesConfig, upstream *url.URL) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			rest := strings.Replace(pr.In.URL.Path, config.Prefix, "", 1)
-			pr.Out.URL.Path = rest
+			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, config.Prefix)
+			pr.Out.URL.RawPath = strings.TrimPrefix(pr.In.URL.RawPath, config.Prefix)
 			pr.SetURL(upstream)
 			pr.Out.Header.Set("X-Forwarded-Prefix", config.Prefix)
 
