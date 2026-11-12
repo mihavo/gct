@@ -12,11 +12,19 @@ import (
 
 	"github.com/mihavo/gct/internal/config"
 	"github.com/mihavo/gct/internal/gate"
+	"github.com/mihavo/gct/internal/logging"
 	"github.com/redis/go-redis/v9"
 )
 
 func main() {
 	ctx := context.Background()
+
+	_, closeLogs, err := logging.Setup()
+	if err != nil {
+		log.Fatalf("setting up logging: %v", err)
+	}
+	defer closeLogs()
+	gate.RouteRedisLogsToSlog()
 
 	configPath, ok := os.LookupEnv("GATE_CONFIG_PATH")
 	if !ok {

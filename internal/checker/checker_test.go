@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -276,6 +277,69 @@ func TestScheduleKeepsCheckingWhileOneTargetHangs(t *testing.T) {
 	}
 	if got := hangHits.Load(); got != 1 {
 		t.Fatalf("hanging target requested %d times, want 1 while it is in flight", got)
+	}
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestScheduleWritesTheTableToTheConfiguredOutput(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newTestChecker(t, 2, time.Second, Target{Name: "alpha", URL: srv.URL, ExpectedStatus: http.StatusOK})
+	out := &lockedBuffer{}
+	c.Out = out
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.Schedule(ctx)
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for !strings.Contains(out.String(), "alpha") || !strings.Contains(out.String(), "OK") {
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatalf("table never reached the configured output, got:\n%s", out.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Schedule did not stop after cancel")
+	}
+
+	if strings.Contains(out.String(), "\x1b[") {
+		t.Errorf("output contains terminal escape codes although it is not a terminal:\n%q", out.String())
+	}
+}
+
+func TestNewCheckerDefaultsOutputToStdout(t *testing.T) {
+	c := newTestChecker(t, 1, time.Second, Target{Name: "alpha", URL: "http://localhost", ExpectedStatus: http.StatusOK})
+	if c.Out != os.Stdout {
+		t.Errorf("Out = %v, want os.Stdout", c.Out)
 	}
 }
 

@@ -3,7 +3,9 @@ package checker
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/mihavo/gct/internal/config"
@@ -11,6 +13,7 @@ import (
 
 type Checker struct {
 	Config  config.CheckerConfig
+	Out     io.Writer
 	client  *http.Client
 	targets chan Target
 	results chan Result
@@ -68,6 +71,7 @@ func NewChecker(config config.CheckerConfig) (*Checker, error) {
 
 	return &Checker{
 		Config:  config,
+		Out:     os.Stdout,
 		client:  &http.Client{},
 		targets: make(chan Target),
 		results: make(chan Result),

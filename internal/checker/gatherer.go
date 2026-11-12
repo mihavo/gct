@@ -3,14 +3,13 @@ package checker
 import (
 	"context"
 	"log/slog"
-	"os"
 	"time"
 )
 
 func (c *Checker) GatherAndPresent(ctx context.Context) {
 
 	results := make(map[string]Result, len(c.Config.Targets))
-	table := newTableWriter(os.Stdout)
+	table := newTableWriter(c.Out)
 
 	ticker := time.NewTicker(c.Config.Interval)
 	defer ticker.Stop()

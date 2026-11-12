@@ -11,10 +11,18 @@ import (
 
 	"github.com/mihavo/gct/internal/checker"
 	"github.com/mihavo/gct/internal/config"
+	"github.com/mihavo/gct/internal/logging"
 )
 
 func main() {
 	ctx := context.Background()
+
+	logOut, closeLogs, err := logging.Setup()
+	if err != nil {
+		log.Fatalf("setting up logging: %v", err)
+	}
+	defer closeLogs()
+
 	configPath, ok := os.LookupEnv("CHECKER_CONFIG_PATH")
 	if !ok {
 		configPath = "./configs/checker.yml"
@@ -32,6 +40,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Could not instantiate checker %v", err)
 	}
+	chck.Out = logOut
 	chck.Schedule(ctx)
 
 }
