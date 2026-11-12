@@ -53,6 +53,28 @@ services:
     tty: true
     stop_grace_period: 10s
 
+  logs-init:
+    image: busybox:1.37
+    command: ["touch", "/logs/gate.log", "/logs/checker.log"]
+    volumes:
+      - logs:/logs
+
+  tailer:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        CMD: tailer
+    environment:
+      TAILER_CONFIG_PATH: /etc/gct/tailer.yml
+    volumes:
+      - ./tailer.yml:/etc/gct/tailer.yml:ro
+      - logs:/logs:ro
+    depends_on:
+      logs-init:
+        condition: service_completed_successfully
+    stop_grace_period: 5s
+
   redis:
     image: redis:7-alpine
     ports:
