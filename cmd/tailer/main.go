@@ -32,4 +32,6 @@ func main() {
 	}
 	defer tailer.Close()
 
+	tailer.StreamAll(notifyCtx)
+	defer stop()
 }

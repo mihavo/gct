@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/mihavo/gct/internal/config"
 )
@@ -75,4 +77,41 @@ func closeFiles(files []*os.File) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (t *Tailer) StreamAll(ctx context.Context) {
+	var tailers sync.WaitGroup
+	for i := 0; i < len(t.config.Sources); i++ {
+		tailers.Go(func() {
+			t.Stream(ctx, i)
+		})
+	}
+	defer tailers.Wait()
+}
+
+func (t *Tailer) Stream(ctx context.Context, idx int) {
+	pending := ""
+	var timer *time.Timer
+	for {
+		line, err := t.readers[idx].ReadString('\n')
+		switch {
+		case err == nil:
+			fmt.Printf("[%s] %s%s", t.config.Sources[idx].Name, pending, line)
+			pending = ""
+			continue
+		case len(line) > 0 && err == io.EOF:
+			pending += line
+			timer = time.NewTimer(time.Duration(200 * time.Millisecond))
+		case len(line) == 0 && err == io.EOF:
+			timer = time.NewTimer(time.Duration(200 * time.Millisecond))
+		case err != nil:
+			slog.Error("Tailer error", "error", err)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+	}
 }
