@@ -10,8 +10,10 @@ services:
       LIMITER_REDIS_ADDR: redis:6379
       LIMITER_REDIS_PASSWORD: ""
       LIMITER_REDIS_DB: "0"
+      LOG_FILE: /logs/gate.log
     volumes:
       - ./gate.yml:/etc/gct/gate.yml:ro
+      - logs:/logs
     ports:
       - "8080:8080"
     stop_grace_period: 10s
@@ -44,8 +46,10 @@ services:
     environment:
       CHECKER_CONFIG_PATH: /etc/gct/checker.yml
       TZ: ${TZ:-Europe/Athens}
+      LOG_FILE: /logs/checker.log
     volumes:
       - ./checker.yml:/etc/gct/checker.yml:ro
+      - logs:/logs
     tty: true
     stop_grace_period: 10s
 
@@ -98,3 +102,6 @@ services:
     image: traefik/whoami
     environment:
       WHOAMI_NAME: billing
+
+volumes:
+  logs:
