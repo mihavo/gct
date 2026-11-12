@@ -19,6 +19,8 @@ type Tailer struct {
 	config  config.TailerConfig
 	readers []*bufio.Reader
 	files   []*os.File
+	Out     io.Writer
+	outFile *os.File
 }
 
 func NewTailer(config config.TailerConfig) (*Tailer, error) {
@@ -32,9 +34,7 @@ func NewTailer(config config.TailerConfig) (*Tailer, error) {
 	for i, source := range config.Sources {
 		file, err := os.Open(source.Path)
 		if err != nil {
-			if closeErr := closeFiles(files); closeErr != nil {
-				slog.Error("Couldn't close files", "error", closeErr)
-			}
+			closeAndLog(files)
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, errors.New("Source " + source.Name + " has invalid path")
 			}
@@ -50,15 +50,29 @@ func NewTailer(config config.TailerConfig) (*Tailer, error) {
 		files[i] = file
 	}
 
+	var out io.Writer = os.Stdout
+	var outFile *os.File
+	if config.Out != "" {
+		file, err := os.OpenFile(config.Out, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			closeAndLog(files)
+			return nil, fmt.Errorf("couldn't open output %s: %w", config.Out, err)
+		}
+		out = file
+		outFile = file
+	}
+
 	return &Tailer{
 		config:  config,
 		readers: readers,
 		files:   files,
+		Out:     out,
+		outFile: outFile,
 	}, nil
 }
 
-func (t *Tailer) Close() {
-	closeFiles(t.files)
+func (t *Tailer) Close() error {
+	return closeFiles(append(t.files[:len(t.files):len(t.files)], t.outFile)...)
 }
 
 func (t *Tailer) Watch(ctx context.Context, idx int) {
@@ -66,10 +80,16 @@ func (t *Tailer) Watch(ctx context.Context, idx int) {
 	if errors.Is(err, io.EOF) {
 		return
 	}
-	fmt.Printf("%s: %s", t.config.Sources[idx].Name, strings.Trim(line, "\n"))
+	fmt.Fprintf(t.Out, "%s: %s", t.config.Sources[idx].Name, strings.Trim(line, "\n"))
 }
 
-func closeFiles(files []*os.File) error {
+func closeAndLog(files []*os.File) {
+	if err := closeFiles(files...); err != nil {
+		slog.Error("Couldn't close files", "error", err)
+	}
+}
+
+func closeFiles(files ...*os.File) error {
 	errs := make([]error, 0)
 	for _, file := range files {
 		if file != nil {
@@ -96,7 +116,7 @@ func (t *Tailer) Stream(ctx context.Context, idx int) {
 		line, err := t.readers[idx].ReadString('\n')
 		switch {
 		case err == nil:
-			fmt.Printf("[%s] %s%s", t.config.Sources[idx].Name, pending, line)
+			fmt.Fprintf(t.Out, "[%s] %s%s", t.config.Sources[idx].Name, pending, line)
 			pending = ""
 			continue
 		case len(line) > 0 && err == io.EOF:

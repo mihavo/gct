@@ -45,6 +45,7 @@ type TargetConfig struct {
 
 type TailerConfig struct {
 	Sources []SourceConfig `yaml:"sources"`
+	Out     string         `yaml:"out"`
 }
 
 type SourceConfig struct {
