@@ -2,9 +2,13 @@ package tailer
 
 import (
 	"bufio"
+	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/mihavo/gct/internal/config"
 )
@@ -34,6 +38,12 @@ func NewTailer(config config.TailerConfig) (*Tailer, error) {
 			}
 			return nil, errors.New("Couldn't open source" + source.Name)
 		}
+		_, err = file.Seek(0, io.SeekEnd)
+
+		if err != nil {
+			return nil, errors.New("Failed to set offset for file" + file.Name())
+		}
+
 		readers[i] = bufio.NewReader(file)
 		files[i] = file
 	}
@@ -47,6 +57,14 @@ func NewTailer(config config.TailerConfig) (*Tailer, error) {
 
 func (t *Tailer) Close() {
 	closeFiles(t.files)
+}
+
+func (t *Tailer) Watch(ctx context.Context, idx int) {
+	line, err := t.readers[idx].ReadString('\n')
+	if errors.Is(err, io.EOF) {
+		return
+	}
+	fmt.Printf("%s: %s", t.config.Sources[idx].Name, strings.Trim(line, "\n"))
 }
 
 func closeFiles(files []*os.File) error {
