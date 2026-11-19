@@ -120,9 +120,15 @@ func (t *Tailer) Stream(ctx context.Context, idx int) {
 			pending = ""
 			continue
 		case len(line) > 0 && err == io.EOF:
+			if rerr := t.reopenIfRotated(idx); rerr != nil {
+				slog.Error("Rotation check failed", "source", t.config.Sources[idx].Name, "error", rerr)
+			}
 			pending += line
 			timer = time.NewTimer(time.Duration(200 * time.Millisecond))
 		case len(line) == 0 && err == io.EOF:
+			if rerr := t.reopenIfRotated(idx); rerr != nil {
+				slog.Error("Rotation check failed", "source", t.config.Sources[idx].Name, "error", rerr)
+			}
 			timer = time.NewTimer(time.Duration(200 * time.Millisecond))
 		case err != nil:
 			slog.Error("Tailer error", "error", err)
@@ -134,4 +140,39 @@ func (t *Tailer) Stream(ctx context.Context, idx int) {
 		case <-timer.C:
 		}
 	}
+}
+
+func (t *Tailer) reopenIfRotated(idx int) error {
+	path := t.config.Sources[idx].Path
+
+	current, err := t.files[idx].Stat()
+
+	if err != nil {
+		return fmt.Errorf("stat open file: %w", err)
+	}
+	onDisk, err := os.Stat(path)
+
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	if os.SameFile(current, onDisk) {
+		return nil
+	}
+
+	next, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+
+	if err := t.files[idx].Close(); err != nil {
+		slog.Error("Couldn't close rotated file", "source", t.config.Sources[idx].Name, "error", err)
+	}
+	t.files[idx] = next
+	t.readers[idx] = bufio.NewReader(next)
+	return nil
 }

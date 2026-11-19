@@ -262,3 +262,92 @@ func TestStreamAllReadsEverySourceAndReturnsOnCancel(t *testing.T) {
 		t.Fatal("StreamAll did not return after the context was cancelled")
 	}
 }
+
+func streamInBackground(t *testing.T, tl *Tailer) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { tl.Stream(ctx, 0); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
+func TestStreamFollowsAFileThatIsRenamedAndRecreated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.log")
+	writeFile(t, path, "")
+	tl, out := newTestTailer(t, config.SourceConfig{Name: "a", Path: path})
+	streamInBackground(t, tl)
+
+	appendToFile(t, path, "before\n")
+	eventually(t, "the line before the rotation", func() bool { return out.String() == "[a] before\n" })
+
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "first in new file\n")
+
+	eventually(t, "the first line of the new file", func() bool {
+		return out.String() == "[a] before\n[a] first in new file\n"
+	})
+
+	appendToFile(t, path, "later\n")
+	eventually(t, "a later line in the new file", func() bool {
+		return strings.HasSuffix(out.String(), "[a] later\n")
+	})
+}
+
+func TestStreamIgnoresTheRenamedFileAfterTheSwitch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.log")
+	writeFile(t, path, "")
+	tl, out := newTestTailer(t, config.SourceConfig{Name: "a", Path: path})
+	streamInBackground(t, tl)
+
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "new\n")
+	eventually(t, "the switch to the new file", func() bool { return out.String() == "[a] new\n" })
+
+	appendToFile(t, path+".1", "to the old file\n")
+	time.Sleep(600 * time.Millisecond)
+
+	if got := out.String(); got != "[a] new\n" {
+		t.Errorf("output = %q, want only the line from the new file", got)
+	}
+}
+
+func TestStreamWaitsOutAMissingPathDuringRotation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.log")
+	writeFile(t, path, "")
+	tl, out := newTestTailer(t, config.SourceConfig{Name: "a", Path: path})
+	streamInBackground(t, tl)
+
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(600 * time.Millisecond)
+	if got := out.String(); got != "" {
+		t.Fatalf("output during the gap = %q, want nothing", got)
+	}
+
+	writeFile(t, path, "after the gap\n")
+	eventually(t, "the line written after the gap", func() bool { return out.String() == "[a] after the gap\n" })
+}
+
+func TestStreamSwitchesFilesEvenWhileAPartialLineIsPending(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.log")
+	writeFile(t, path, "")
+	tl, out := newTestTailer(t, config.SourceConfig{Name: "a", Path: path})
+	streamInBackground(t, tl)
+
+	appendToFile(t, path, "half")
+	time.Sleep(400 * time.Millisecond)
+
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "fresh\n")
+
+	eventually(t, "the line from the new file", func() bool {
+		return strings.HasSuffix(out.String(), "fresh\n")
+	})
+}
