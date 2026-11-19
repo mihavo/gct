@@ -182,6 +182,7 @@ func TestStreamPrintsNewLinesWithTheSourceNameAndSkipsOldContent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.log")
 	writeFile(t, path, "old\n")
 	tl, out := newTestTailer(t, config.SourceConfig{Name: "a", Path: path})
+	startPrinter(t, tl)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -197,6 +198,7 @@ func TestStreamHoldsBackAPartialLineUntilItIsComplete(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.log")
 	writeFile(t, path, "")
 	tl, out := newTestTailer(t, config.SourceConfig{Name: "a", Path: path})
+	startPrinter(t, tl)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -217,6 +219,7 @@ func TestStreamStopsWhenTheContextIsCancelled(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.log")
 	writeFile(t, path, "")
 	tl, _ := newTestTailer(t, config.SourceConfig{Name: "a", Path: path})
+	startPrinter(t, tl)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -229,6 +232,32 @@ func TestStreamStopsWhenTheContextIsCancelled(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Stream did not return after the context was cancelled")
+	}
+}
+
+func TestStreamLeavesABlockedSendWhenTheContextIsCancelled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.log")
+	writeFile(t, path, "")
+	tl, _ := newTestTailer(t, config.SourceConfig{Name: "a", Path: path})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { tl.Stream(ctx, 0); close(done) }()
+
+	appendToFile(t, path, "nobody reads this\n")
+	time.Sleep(300 * time.Millisecond)
+
+	select {
+	case <-done:
+		t.Fatal("Stream returned before the context was cancelled")
+	default:
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stream stayed blocked in the send after the context was cancelled")
 	}
 }
 
@@ -263,8 +292,16 @@ func TestStreamAllReadsEverySourceAndReturnsOnCancel(t *testing.T) {
 	}
 }
 
+func startPrinter(t *testing.T, tl *Tailer) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { tl.Print(); close(done) }()
+	t.Cleanup(func() { close(tl.lines); <-done })
+}
+
 func streamInBackground(t *testing.T, tl *Tailer) {
 	t.Helper()
+	startPrinter(t, tl)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { tl.Stream(ctx, 0); close(done) }()

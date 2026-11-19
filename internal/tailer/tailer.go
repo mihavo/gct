@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +18,7 @@ type Tailer struct {
 	config  config.TailerConfig
 	readers []*bufio.Reader
 	files   []*os.File
+	lines   chan string
 	Out     io.Writer
 	outFile *os.File
 }
@@ -66,6 +66,7 @@ func NewTailer(config config.TailerConfig) (*Tailer, error) {
 		config:  config,
 		readers: readers,
 		files:   files,
+		lines:   make(chan string),
 		Out:     out,
 		outFile: outFile,
 	}, nil
@@ -73,14 +74,6 @@ func NewTailer(config config.TailerConfig) (*Tailer, error) {
 
 func (t *Tailer) Close() error {
 	return closeFiles(append(t.files[:len(t.files):len(t.files)], t.outFile)...)
-}
-
-func (t *Tailer) Watch(ctx context.Context, idx int) {
-	line, err := t.readers[idx].ReadString('\n')
-	if errors.Is(err, io.EOF) {
-		return
-	}
-	fmt.Fprintf(t.Out, "%s: %s", t.config.Sources[idx].Name, strings.Trim(line, "\n"))
 }
 
 func closeAndLog(files []*os.File) {
@@ -101,12 +94,18 @@ func closeFiles(files ...*os.File) error {
 
 func (t *Tailer) StreamAll(ctx context.Context) {
 	var tailers sync.WaitGroup
+	var printer sync.WaitGroup
 	for i := 0; i < len(t.config.Sources); i++ {
 		tailers.Go(func() {
 			t.Stream(ctx, i)
 		})
 	}
-	defer tailers.Wait()
+	printer.Go(func() {
+		t.Print()
+	})
+	tailers.Wait()
+	close(t.lines)
+	printer.Wait()
 }
 
 func (t *Tailer) Stream(ctx context.Context, idx int) {
@@ -116,7 +115,11 @@ func (t *Tailer) Stream(ctx context.Context, idx int) {
 		line, err := t.readers[idx].ReadString('\n')
 		switch {
 		case err == nil:
-			fmt.Fprintf(t.Out, "[%s] %s%s", t.config.Sources[idx].Name, pending, line)
+			select {
+			case <-ctx.Done():
+				return
+			case t.lines <- fmt.Sprintf("[%s] %s%s", t.config.Sources[idx].Name, pending, line):
+			}
 			pending = ""
 			continue
 		case len(line) > 0 && err == io.EOF:
@@ -130,7 +133,7 @@ func (t *Tailer) Stream(ctx context.Context, idx int) {
 				slog.Error("Rotation check failed", "source", t.config.Sources[idx].Name, "error", rerr)
 			}
 			timer = time.NewTimer(time.Duration(200 * time.Millisecond))
-		case err != nil:
+		default:
 			slog.Error("Tailer error", "error", err)
 			return
 		}
@@ -175,4 +178,10 @@ func (t *Tailer) reopenIfRotated(idx int) error {
 	t.files[idx] = next
 	t.readers[idx] = bufio.NewReader(next)
 	return nil
+}
+
+func (t *Tailer) Print() {
+	for line := range t.lines {
+		fmt.Fprint(t.Out, line)
+	}
 }
