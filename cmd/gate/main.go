@@ -84,8 +84,9 @@ func buildRedisInstance() *redis.Client {
 	}
 
 	client := redis.NewClient(&redis.Options{
-		Addr:     opts[gate.LimiterRedisAddr],
-		Password: opts[gate.LimiterRedisPassword],
-		DB:       db})
+		Addr:        opts[gate.LimiterRedisAddr],
+		Password:    opts[gate.LimiterRedisPassword],
+		DB:          db,
+		ReadTimeout: time.Millisecond * 200})
 	return client
 }

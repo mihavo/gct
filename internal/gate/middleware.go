@@ -2,15 +2,19 @@ package gate
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"time"
 	"uuid"
 
 	appjson "github.com/mihavo/gct/internal/core/json"
+	"github.com/redis/go-redis/v9"
 )
 
 type Middleware interface {
@@ -25,6 +29,10 @@ type RecoveryMiddleware struct {
 
 type LimiterMiddleware struct {
 	limiter *Limiter
+}
+
+type AuthMiddleware struct {
+	redis *redis.Client
 }
 
 func (l *LimiterMiddleware) Process(next http.Handler) http.Handler {
@@ -72,6 +80,33 @@ func (l *LoggingMiddleware) Process(next http.Handler) http.Handler {
 			slog.Info("Request Details: ", "RequestID", requestId, "method", r.Method, "path", r.URL.Path, "status", rwWrapper.code, "duration:", time.Since(start))
 		}()
 		next.ServeHTTP(&rwWrapper, r)
+	})
+}
+
+func (a *AuthMiddleware) Process(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get(AuthKeyHeader)
+		if key == "" {
+			appjson.WriteError(w, "no api key present", http.StatusUnauthorized)
+			return
+		}
+		sum := sha256.Sum256([]byte(key))
+		hash := hex.EncodeToString(sum[:])
+		client, err := a.redis.Get(r.Context(), AuthKeyPrefix+hash).Result()
+		if err != nil {
+			if errors.Is(err, redis.Nil) {
+				appjson.WriteError(w, "no api key present", http.StatusUnauthorized)
+			} else if errors.Is(err, os.ErrDeadlineExceeded) {
+				slog.Error("redis auth deadline exceeded", "error", err)
+				appjson.WriteError(w, "internal server error", http.StatusServiceUnavailable)
+			} else {
+				slog.Error("redis auth error", "error", err)
+				appjson.WriteError(w, "internal server error", http.StatusInternalServerError)
+			}
+			return
+		}
+		slog.Debug("Client " + client + " authenticated at: " + time.Now().String())
+		next.ServeHTTP(w, r)
 	})
 }
 

@@ -66,6 +66,7 @@ func NewGate(ctx context.Context, redisClient *redis.Client, gateConfig config.G
 	handler = Chain(handler,
 		&LoggingMiddleware{},
 		&RecoveryMiddleware{},
+		&AuthMiddleware{redis: redisClient},
 		&LimiterMiddleware{limiter: limiter})
 
 	server := http.Server{

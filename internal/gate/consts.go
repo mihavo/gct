@@ -4,6 +4,8 @@ const (
 	LimiterRedisAddr     = "LIMITER_REDIS_ADDR"
 	LimiterRedisPassword = "LIMITER_REDIS_PASSWORD"
 	LimiterRedisDB       = "LIMITER_REDIS_DB"
+	AuthKeyHeader        = "X-API-Key"
+	AuthKeyPrefix        = "auth:"
 )
 
 const (
