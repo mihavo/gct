@@ -39,3 +39,20 @@ A live view of several log sources at once.
 
 Run the gateway demo with `docker compose up --build` in `examples/compose`,
 and run the tests with `go test -race ./...`.
+
+### API keys
+
+Every request to the gateway needs an `X-API-Key` header. Create a key for a
+client with the `keygen` service, which prints the key once and stores only its
+hash in Redis:
+
+```bash
+docker compose run --rm keygen billing-service
+```
+
+Then send it with the request. The upstream receives the client's name in
+`X-Client-Id` and never sees the key:
+
+```bash
+curl -H "X-API-Key: <key>" localhost:8080/auth/
+```

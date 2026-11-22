@@ -1,11 +1,11 @@
 package gate
 
 const (
-	LimiterRedisAddr     = "LIMITER_REDIS_ADDR"
-	LimiterRedisPassword = "LIMITER_REDIS_PASSWORD"
-	LimiterRedisDB       = "LIMITER_REDIS_DB"
-	AuthKeyHeader        = "X-API-Key"
-	AuthKeyPrefix        = "auth:"
+	RedisAddr     = "REDIS_ADDR"
+	RedisPassword = "REDIS_PASSWORD"
+	RedisDB       = "REDIS_DB"
+	AuthKeyHeader = "X-API-Key"
+	AuthKeyPrefix = "auth:"
 )
 
 const (

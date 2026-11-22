@@ -7,9 +7,9 @@ services:
       dockerfile: Dockerfile
     environment:
       GATE_CONFIG_PATH: /etc/gct/gate.yml
-      LIMITER_REDIS_ADDR: redis:6379
-      LIMITER_REDIS_PASSWORD: ""
-      LIMITER_REDIS_DB: "0"
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: "0"
       LOG_FILE: /logs/gate.log
     volumes:
       - ./gate.yml:/etc/gct/gate.yml:ro
@@ -52,6 +52,22 @@ services:
       - logs:/logs
     tty: true
     stop_grace_period: 10s
+
+  keygen:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        CMD: keygen
+    profiles: ["tools"]
+    environment:
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: "0"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: "no"
 
   logs-init:
     image: busybox:1.37

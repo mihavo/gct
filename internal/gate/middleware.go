@@ -2,8 +2,6 @@ package gate
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net"
@@ -90,14 +88,16 @@ func (a *AuthMiddleware) Process(next http.Handler) http.Handler {
 			appjson.WriteError(w, "no api key present", http.StatusUnauthorized)
 			return
 		}
-		sum := sha256.Sum256([]byte(key))
-		hash := hex.EncodeToString(sum[:])
+		hash := GenerateKeyHash(key)
 		client, err := a.redis.Get(r.Context(), AuthKeyPrefix+hash).Result()
 		if err != nil {
 			if errors.Is(err, redis.Nil) {
-				appjson.WriteError(w, "no api key present", http.StatusUnauthorized)
+				appjson.WriteError(w, "invalid api key", http.StatusUnauthorized)
 			} else if errors.Is(err, os.ErrDeadlineExceeded) {
 				slog.Error("redis auth deadline exceeded", "error", err)
+				appjson.WriteError(w, "internal server error", http.StatusServiceUnavailable)
+			} else if errors.Is(err, context.DeadlineExceeded) {
+				slog.Error("redis connection timeout", "error", err)
 				appjson.WriteError(w, "internal server error", http.StatusServiceUnavailable)
 			} else {
 				slog.Error("redis auth error", "error", err)
@@ -105,8 +105,9 @@ func (a *AuthMiddleware) Process(next http.Handler) http.Handler {
 			}
 			return
 		}
-		slog.Debug("Client " + client + " authenticated at: " + time.Now().String())
-		next.ServeHTTP(w, r)
+		slog.Debug("client authenticated", "client", client)
+		ctx := context.WithValue(r.Context(), ClientId{}, client)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

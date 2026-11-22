@@ -33,6 +33,9 @@ type ResponseWriterWithCode struct {
 type RequestID struct {
 }
 
+type ClientId struct {
+}
+
 type RoutingTable struct {
 	routes []Route
 }

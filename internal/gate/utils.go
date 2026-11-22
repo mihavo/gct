@@ -63,6 +63,13 @@ func buildProxy(config config.RoutesConfig, upstream *url.URL) *httputil.Reverse
 			if requestUUID, ok := pr.In.Context().Value(RequestID{}).(uuid.UUID); ok {
 				pr.Out.Header.Set("X-Request-Id", requestUUID.String())
 			}
+			clientId, ok := pr.In.Context().Value(ClientId{}).(string)
+			if ok {
+				pr.Out.Header.Set("X-Client-Id", clientId)
+			} else {
+				pr.Out.Header.Del("X-Client-Id")
+			}
+			pr.Out.Header.Del(AuthKeyHeader)
 			pr.SetXForwarded()
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

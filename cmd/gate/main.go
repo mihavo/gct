@@ -6,14 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/mihavo/gct/internal/config"
 	"github.com/mihavo/gct/internal/gate"
 	"github.com/mihavo/gct/internal/logging"
-	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -36,7 +34,10 @@ func main() {
 	}
 	slog.Debug("gate config loaded: %+v", "config", gateConfig)
 
-	redisClient := buildRedisInstance()
+	redisClient, err := gate.NewRedisClient()
+	if err != nil {
+		log.Fatalf("creating redis client: %v", err)
+	}
 	defer redisClient.Close()
 
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 5*time.Second)
@@ -69,24 +70,4 @@ func main() {
 		}
 		slog.Info("gate server is down", "context", notifyCtx.Err().Error())
 	}
-}
-
-func buildRedisInstance() *redis.Client {
-	opts, err := gate.RequireEnv(gate.LimiterRedisAddr, gate.LimiterRedisPassword, gate.LimiterRedisDB)
-
-	if err != nil {
-		log.Fatalf("missing opts for gate limiter %v", err)
-	}
-
-	db, err := strconv.Atoi(opts[gate.LimiterRedisDB])
-	if err != nil {
-		log.Fatalf("could not parse redis db option: %v", err)
-	}
-
-	client := redis.NewClient(&redis.Options{
-		Addr:        opts[gate.LimiterRedisAddr],
-		Password:    opts[gate.LimiterRedisPassword],
-		DB:          db,
-		ReadTimeout: time.Millisecond * 200})
-	return client
 }

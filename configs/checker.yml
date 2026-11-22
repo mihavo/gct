@@ -1,4 +1,4 @@
-interval: 500ms
+interval: 2s
 timeout: 1s
 workers: 4
 
