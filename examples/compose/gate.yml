@@ -10,14 +10,6 @@ limiter:
     per: 1s
 
 routes:
-  - name: "auth"
-    prefix: "/auth"
-    location: "http://auth:80"
-
-  - name: "service1"
-    prefix: "/service1"
-    location: "http://service1:80"
-
   - name: "users"
     prefix: "/users"
     location: "http://users:80"

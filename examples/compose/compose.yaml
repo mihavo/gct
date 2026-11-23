@@ -20,10 +20,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      auth:
-        condition: service_started
-      service1:
-        condition: service_started
       users:
         condition: service_started
       orders:
@@ -69,6 +65,25 @@ services:
         condition: service_healthy
     restart: "no"
 
+  issuer:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        CMD: issuer
+    command: ["serve"]
+    profiles: ["issuer"]
+    environment:
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: "0"
+    ports:
+      - "9090:9090"
+    depends_on:
+      redis:
+        condition: service_healthy
+    stop_grace_period: 10s
+
   logs-init:
     image: busybox:1.37
     command: ["touch", "/logs/gate.log", "/logs/checker.log"]
@@ -100,16 +115,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-
-  auth:
-    image: traefik/whoami
-    environment:
-      WHOAMI_NAME: auth
-
-  service1:
-    image: traefik/whoami
-    environment:
-      WHOAMI_NAME: service1
 
   users:
     image: traefik/whoami

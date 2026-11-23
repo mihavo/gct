@@ -3,14 +3,6 @@ timeout: 10s
 workers: 4
 
 targets:
-  - name: "auth"
-    url: "http://auth:80/"
-    expected_status: 200
-
-  - name: "service1"
-    url: "http://service1:80/"
-    expected_status: 200
-
   - name: "users"
     url: "http://users:80/"
     expected_status: 200

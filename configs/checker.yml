@@ -3,14 +3,6 @@ timeout: 1s
 workers: 4
 
 targets:
-  - name: "auth"
-    url: "http://localhost:8080/auth"
-    expected_status: 200
-
-  - name: "service1"
-    url: "http://localhost:8080/service1"
-    expected_status: 200
-
   - name: "users"
     url: "http://localhost:8080/users"
     expected_status: 200

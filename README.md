@@ -54,5 +54,5 @@ Then send it with the request. The upstream receives the client's name in
 `X-Client-Id` and never sees the key:
 
 ```bash
-curl -H "X-API-Key: <key>" localhost:8080/auth/
+curl -H "X-API-Key: <key>" localhost:8080/users/
 ```

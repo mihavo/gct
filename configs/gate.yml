@@ -10,10 +10,26 @@ limiter:
     per: 1s
 
 routes:
-  - name: "auth"
-    prefix: "/auth"
-    location: "http://localhost:8081/auth"
+  - name: "users"
+    prefix: "/users"
+    location: "http://localhost:8081"
 
-  - name: "service1"
-    prefix: "/service1"
-    location: "http://localhost:8082/service1"
+  - name: "orders"
+    prefix: "/orders"
+    location: "http://localhost:8082"
+
+  - name: "payments"
+    prefix: "/payments"
+    location: "http://localhost:8083"
+
+  - name: "search"
+    prefix: "/search"
+    location: "http://localhost:8084"
+
+  - name: "inventory"
+    prefix: "/inventory"
+    location: "http://localhost:8085"
+
+  - name: "billing"
+    prefix: "/billing"
+    location: "http://localhost:8086"
