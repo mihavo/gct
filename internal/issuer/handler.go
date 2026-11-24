@@ -9,15 +9,17 @@ import (
 
 	appjson "github.com/mihavo/gct/internal/core/json"
 	"github.com/mihavo/gct/internal/gate"
+	"github.com/mihavo/gct/internal/keystore"
 	"github.com/redis/go-redis/v9"
 )
 
 type Handler struct {
 	redis *redis.Client
+	keys  []keystore.Key
 }
 
-func NewHandler(redisClient *redis.Client) *Handler {
-	return &Handler{redis: redisClient}
+func NewHandler(redisClient *redis.Client, keys []keystore.Key) *Handler {
+	return &Handler{redis: redisClient, keys: keys}
 }
 
 func (h *Handler) Routes() http.Handler {

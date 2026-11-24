@@ -84,13 +84,19 @@ func runServe() {
 		slog.Info("no signing key found, generated the first one", "dir", keysDir)
 	}
 
+	keys, err := keystore.Load(keysDir)
+	if err != nil {
+		log.Fatalf("loading signing keys: %v", err)
+	}
+	slog.Info("signing keys loaded", "dir", keysDir, "count", len(keys))
+
 	redisClient, err := gate.NewRedisClient()
 	if err != nil {
 		log.Fatalf("creating redis client: %v", err)
 	}
 	defer redisClient.Close()
 
-	issuer, err := issuer.NewIssuer(ctx, redisClient, *config)
+	issuer, err := issuer.NewIssuer(ctx, redisClient, *config, keys)
 
 	if err != nil {
 		log.Fatalf("could not initialize issuer %v", err)
