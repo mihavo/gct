@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -21,6 +22,11 @@ const (
 	fileMode          = 0o600
 	kidBytes          = 16
 )
+
+type Key struct {
+	Kid string
+	Key *ecdsa.PrivateKey
+}
 
 func KeyID(pub *ecdsa.PublicKey) (string, error) {
 	der, err := x509.MarshalPKIXPublicKey(pub)
@@ -104,4 +110,52 @@ func keysExist(dir string) (bool, error) {
 		}
 	}
 	return exists, nil
+}
+
+func Load(dir string) ([]Key, error) {
+	files, err := os.ReadDir(dir)
+	keys := make([]Key, 0)
+
+	if err != nil {
+		return []Key{}, err
+	}
+	for _, file := range files {
+		if !file.IsDir() && filepath.Ext(file.Name()) == keyFileExt {
+			content, err := os.ReadFile(filepath.Join(dir, file.Name()))
+			if err != nil {
+				return []Key{}, err
+			}
+			block, _ := pem.Decode(content)
+			if block == nil {
+				return []Key{}, fmt.Errorf("%s: not a PEM file", file.Name())
+			}
+			if block.Type != privateKeyPEMType {
+				return []Key{}, fmt.Errorf("%s: PEM type is %q, want %q", file.Name(), block.Type, privateKeyPEMType)
+			}
+
+			parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err != nil {
+				return []Key{}, fmt.Errorf("%s: parsing PKCS#8 key: %w", file.Name(), err)
+			}
+			key, ok := parsed.(*ecdsa.PrivateKey)
+			if !ok {
+				return []Key{}, fmt.Errorf("%s: key is %T, want an ECDSA key", file.Name(), parsed)
+			}
+			if key.Curve != elliptic.P256() {
+				return []Key{}, fmt.Errorf("%s: curve is %s, want P-256", file.Name(), key.Curve.Params().Name)
+			}
+
+			kid, err := KeyID(&key.PublicKey)
+			if err != nil {
+				return []Key{}, fmt.Errorf("%s: %w", file.Name(), err)
+			}
+			if kid != strings.TrimSuffix(file.Name(), keyFileExt) {
+				return []Key{}, fmt.Errorf("%s: file name does not match the key's kid %s", file.Name(), kid)
+			}
+
+			keys = append(keys, Key{Kid: kid, Key: key})
+		}
+	}
+
+	return keys, nil
 }
