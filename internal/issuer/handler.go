@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	appjson "github.com/mihavo/gct/internal/core/json"
 	"github.com/mihavo/gct/internal/gate"
 	"github.com/mihavo/gct/internal/keystore"
@@ -33,7 +35,7 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 	header := r.Header.Get(gate.AuthKeyHeader)
 
 	if header == "" {
-		appjson.WriteError(w, "no api header present", http.StatusBadRequest)
+		appjson.WriteError(w, "no api header present", http.StatusUnauthorized)
 		return
 	}
 	clientName, err := h.redis.Get(r.Context(), gate.AuthKeyPrefix+gate.GenerateKeyHash(header)).Result()
@@ -54,6 +56,32 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims := jwt.RegisteredClaims{
+		Issuer:    "gct",
+		Subject:   clientName,
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(TokenExpirationInterval)),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	key := h.keys[len(h.keys)-1]
+	token.Header["kid"] = key.Kid
+	signed, err := token.SignedString(key.Key)
+
+	if err != nil {
+		slog.Error("could not sign token", "error", err)
+		appjson.WriteError(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	expiresAt, err := token.Claims.GetExpirationTime()
+	if err != nil {
+		slog.Error("could not get token expiration date", "error", err)
+		appjson.WriteError(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	appjson.Write(w, http.StatusCreated, map[string]any{
+		"token":     signed,
+		"expiresAt": expiresAt})
 }
 
 func (h *Handler) jwks(w http.ResponseWriter, r *http.Request) {
