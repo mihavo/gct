@@ -8,6 +8,10 @@ type GateConfig struct {
 	Routes  []RoutesConfig `yaml:"routes"`
 }
 
+type IssuerConfig struct {
+	Server ServerConfig `yaml:"server"`
+}
+
 type ServerConfig struct {
 	ListenAddress string `yaml:"listen_address"`
 	Port          int    `yaml:"port"`

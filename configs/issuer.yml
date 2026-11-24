@@ -1,0 +1,4 @@
+server:
+  listen_address: 'localhost'
+  port: 9090
+  enable_ssl: true
