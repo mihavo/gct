@@ -49,12 +49,12 @@ services:
     tty: true
     stop_grace_period: 10s
 
-  keygen:
+  apikey:
     build:
       context: ../..
       dockerfile: Dockerfile
       args:
-        CMD: keygen
+        CMD: apikey
     profiles: ["tools"]
     environment:
       REDIS_ADDR: redis:6379

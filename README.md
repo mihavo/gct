@@ -43,11 +43,11 @@ and run the tests with `go test -race ./...`.
 ### API keys
 
 Every request to the gateway needs an `X-API-Key` header. Create a key for a
-client with the `keygen` service, which prints the key once and stores only its
+client with the `apikey` service, which prints the key once and stores only its
 hash in Redis:
 
 ```bash
-docker compose run --rm keygen billing-service
+docker compose run --rm apikey billing-service
 ```
 
 Then send it with the request. The upstream receives the client's name in

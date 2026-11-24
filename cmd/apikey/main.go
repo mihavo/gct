@@ -15,7 +15,7 @@ import (
 func main() {
 	flag.Parse()
 	if flag.NArg() != 1 || flag.Arg(0) == "" {
-		fmt.Fprintln(os.Stderr, "usage: keygen <identity-name>")
+		fmt.Fprintln(os.Stderr, "usage: apikey <identity-name>")
 		os.Exit(2)
 	}
 	name := flag.Arg(0)
