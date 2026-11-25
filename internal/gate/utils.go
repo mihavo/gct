@@ -70,6 +70,7 @@ func buildProxy(config config.RoutesConfig, upstream *url.URL) *httputil.Reverse
 				pr.Out.Header.Del("X-Client-Id")
 			}
 			pr.Out.Header.Del(AuthKeyHeader)
+			pr.Out.Header.Del("Authorization")
 			pr.SetXForwarded()
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

@@ -6,6 +6,7 @@ const (
 	RedisDB       = "REDIS_DB"
 	AuthKeyHeader = "X-API-Key"
 	AuthKeyPrefix = "auth:"
+	JWKSPath      = "/jwks"
 )
 
 const (

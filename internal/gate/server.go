@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/MicahParks/keyfunc/v3"
 	"github.com/mihavo/gct/internal/config"
 	appjson "github.com/mihavo/gct/internal/core/json"
 	"github.com/redis/go-redis/v9"
@@ -66,10 +68,27 @@ func NewGate(ctx context.Context, redisClient *redis.Client, gateConfig config.G
 		return nil, err
 	}
 
+	jwksURL, err := url.JoinPath(gateConfig.IssuerURL, JWKSPath)
+	if err != nil {
+		return nil, err
+	}
+
+	noErrorOnFirstFetch := false
+	keyfnc, err := keyfunc.NewDefaultOverrideCtx(ctx, []string{
+		jwksURL,
+	}, keyfunc.Override{
+		RefreshInterval:           time.Duration(gateConfig.JWKSRefreshIntervalMinutes) * time.Minute,
+		NoErrorReturnFirstHTTPReq: &noErrorOnFirstFetch,
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
 	handler = Chain(handler,
 		&LoggingMiddleware{},
 		&RecoveryMiddleware{},
-		&AuthMiddleware{redis: redisClient},
+		&AuthMiddleware{keyfnc: keyfnc},
 		&LimiterMiddleware{limiter: limiter})
 
 	server := http.Server{

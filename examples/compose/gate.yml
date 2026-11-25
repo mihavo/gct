@@ -10,6 +10,7 @@ limiter:
     per: 1s
 
 jwks_refresh_interval_minutes: 1
+issuer_url: "http://issuer:9090"
 
 routes:
   - name: "users"

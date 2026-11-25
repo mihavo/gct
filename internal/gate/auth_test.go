@@ -1,20 +1,93 @@
 package gate
 
 import (
-	"net"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
+	"github.com/MicahParks/keyfunc/v3"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/mihavo/gct/internal/config"
-	"github.com/redis/go-redis/v9"
 )
 
-const testKey = "k_test_0123456789abcdef"
+const (
+	testKey = "k_test_0123456789abcdef"
+	testKid = "key-1"
+)
 
-func authHandler(t *testing.T, client *redis.Client) (http.Handler, *string, *int) {
+func newTestKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	return key
+}
+
+func jwkSetJSON(t *testing.T, keys map[string]*ecdsa.PublicKey) json.RawMessage {
+	t.Helper()
+	entries := make([]map[string]string, 0, len(keys))
+	for kid, pub := range keys {
+		raw, err := pub.Bytes()
+		if err != nil {
+			t.Fatalf("encoding public key: %v", err)
+		}
+		size := (pub.Curve.Params().BitSize + 7) / 8
+		entries = append(entries, map[string]string{
+			"kty": "EC",
+			"crv": pub.Curve.Params().Name,
+			"kid": kid,
+			"x":   base64.RawURLEncoding.EncodeToString(raw[1 : 1+size]),
+			"y":   base64.RawURLEncoding.EncodeToString(raw[1+size:]),
+		})
+	}
+	out, err := json.Marshal(map[string]any{"keys": entries})
+	if err != nil {
+		t.Fatalf("encoding key set: %v", err)
+	}
+	return out
+}
+
+func newTestAuth(t *testing.T, keys map[string]*ecdsa.PublicKey) *AuthMiddleware {
+	t.Helper()
+	kf, err := keyfunc.NewJWKSetJSON(jwkSetJSON(t, keys))
+	if err != nil {
+		t.Fatalf("building keyfunc: %v", err)
+	}
+	return &AuthMiddleware{keyfnc: kf}
+}
+
+func newP256Auth(t *testing.T, key *ecdsa.PrivateKey) *AuthMiddleware {
+	t.Helper()
+	return newTestAuth(t, map[string]*ecdsa.PublicKey{testKid: &key.PublicKey})
+}
+
+func signToken(t *testing.T, method jwt.SigningMethod, key any, kid string, claims jwt.Claims) string {
+	t.Helper()
+	token := jwt.NewWithClaims(method, claims)
+	token.Header["kid"] = kid
+	signed, err := token.SignedString(key)
+	if err != nil {
+		t.Fatalf("signing token: %v", err)
+	}
+	return signed
+}
+
+func validClaims(sub string) jwt.MapClaims {
+	return jwt.MapClaims{
+		"sub": sub,
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(10 * time.Minute).Unix(),
+	}
+}
+
+func authHandler(t *testing.T, mw *AuthMiddleware) (http.Handler, *string, *int) {
 	t.Helper()
 	identity := ""
 	calls := 0
@@ -23,81 +96,108 @@ func authHandler(t *testing.T, client *redis.Client) (http.Handler, *string, *in
 		identity, _ = r.Context().Value(ClientId{}).(string)
 		w.WriteHeader(http.StatusOK)
 	})
-	return (&AuthMiddleware{redis: client}).Process(next), &identity, &calls
+	return mw.Process(next), &identity, &calls
 }
 
-func authRequest(h http.Handler, key string) *httptest.ResponseRecorder {
+func authRequest(h http.Handler, authorization string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
-	if key != "" {
-		req.Header.Set(AuthKeyHeader, key)
+	if authorization != "" {
+		req.Header.Set("Authorization", authorization)
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
 }
 
-func seededRedis(t *testing.T) *miniredis.Miniredis {
-	t.Helper()
-	mr := miniredis.RunT(t)
-	if err := mr.Set(AuthKeyPrefix+GenerateKeyHash(testKey), "billing-service"); err != nil {
-		t.Fatalf("seeding key: %v", err)
+func TestAuthMiddlewareRejectsARequestItCannotTrust(t *testing.T) {
+	key := newTestKey(t)
+	otherKey := newTestKey(t)
+	p384Key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating P-384 key: %v", err)
 	}
-	return mr
+	keys := map[string]*ecdsa.PublicKey{testKid: &key.PublicKey, "key-384": &p384Key.PublicKey}
+
+	tests := []struct {
+		name          string
+		authorization string
+		wantBody      string
+	}{
+		{"no header", "", "no auth token present"},
+		{"another scheme", "Basic dXNlcjpwYXNz", "no auth token present"},
+		{"scheme without a token", "Bearer ", "no auth token present"},
+		{"not a jwt", "Bearer not-a-jwt", "invalid auth token"},
+		{
+			"expired",
+			"Bearer " + signToken(t, jwt.SigningMethodES256, key, testKid, jwt.MapClaims{
+				"sub": "billing-service",
+				"exp": time.Now().Add(-time.Minute).Unix(),
+			}),
+			"invalid auth token",
+		},
+		{
+			"no expiry",
+			"Bearer " + signToken(t, jwt.SigningMethodES256, key, testKid, jwt.MapClaims{"sub": "billing-service"}),
+			"invalid auth token",
+		},
+		{
+			"signed by another key under a known kid",
+			"Bearer " + signToken(t, jwt.SigningMethodES256, otherKey, testKid, validClaims("billing-service")),
+			"invalid auth token",
+		},
+		{
+			"unknown kid",
+			"Bearer " + signToken(t, jwt.SigningMethodES256, key, "key-2", validClaims("billing-service")),
+			"invalid auth token",
+		},
+		{
+			"symmetric algorithm",
+			"Bearer " + signToken(t, jwt.SigningMethodHS256, []byte("secret"), testKid, validClaims("billing-service")),
+			"invalid auth token",
+		},
+		{
+			"another elliptic curve algorithm",
+			"Bearer " + signToken(t, jwt.SigningMethodES384, p384Key, "key-384", validClaims("billing-service")),
+			"invalid auth token",
+		},
+		{
+			"no subject",
+			"Bearer " + signToken(t, jwt.SigningMethodES256, key, testKid, jwt.MapClaims{
+				"exp": time.Now().Add(10 * time.Minute).Unix(),
+			}),
+			"invalid auth token",
+		},
+		{
+			"empty subject",
+			"Bearer " + signToken(t, jwt.SigningMethodES256, key, testKid, validClaims("")),
+			"invalid auth token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _, calls := authHandler(t, newTestAuth(t, keys))
+
+			rec := authRequest(h, tt.authorization)
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", rec.Code)
+			}
+			if got := errorBody(t, rec); got != tt.wantBody {
+				t.Fatalf("error body = %q, want %q", got, tt.wantBody)
+			}
+			if *calls != 0 {
+				t.Fatalf("next handler ran %d times, want 0", *calls)
+			}
+		})
+	}
 }
 
-func TestAuthMiddlewareRejectsARequestWithoutAKey(t *testing.T) {
-	mr := seededRedis(t)
-	h, _, calls := authHandler(t, newClient(t, mr.Addr()))
+func TestAuthMiddlewarePassesAValidTokenWithItsSubject(t *testing.T) {
+	key := newTestKey(t)
+	h, identity, calls := authHandler(t, newP256Auth(t, key))
 
-	rec := authRequest(h, "")
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-	if got := errorBody(t, rec); got != "no api key present" {
-		t.Fatalf("error body = %q, want %q", got, "no api key present")
-	}
-	if *calls != 0 {
-		t.Fatalf("next handler ran %d times, want 0", *calls)
-	}
-}
-
-func TestAuthMiddlewareRejectsAnUnknownKey(t *testing.T) {
-	mr := seededRedis(t)
-	h, _, calls := authHandler(t, newClient(t, mr.Addr()))
-
-	rec := authRequest(h, "not-a-real-key")
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-	if got := errorBody(t, rec); got != "invalid api key" {
-		t.Fatalf("error body = %q, want %q", got, "invalid api key")
-	}
-	if *calls != 0 {
-		t.Fatalf("next handler ran %d times, want 0", *calls)
-	}
-}
-
-func TestAuthMiddlewareDoesNotAcceptTheStoredHashAsAKey(t *testing.T) {
-	mr := seededRedis(t)
-	h, _, calls := authHandler(t, newClient(t, mr.Addr()))
-
-	rec := authRequest(h, GenerateKeyHash(testKey))
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-	if *calls != 0 {
-		t.Fatalf("next handler ran %d times, want 0", *calls)
-	}
-}
-
-func TestAuthMiddlewarePassesAValidKeyWithItsIdentity(t *testing.T) {
-	mr := seededRedis(t)
-	h, identity, calls := authHandler(t, newClient(t, mr.Addr()))
-
-	rec := authRequest(h, testKey)
+	rec := authRequest(h, "Bearer "+signToken(t, jwt.SigningMethodES256, key, testKid, validClaims("billing-service")))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -110,61 +210,34 @@ func TestAuthMiddlewarePassesAValidKeyWithItsIdentity(t *testing.T) {
 	}
 }
 
-func TestAuthMiddlewareFailsClosedWhenRedisIsDown(t *testing.T) {
-	mr := seededRedis(t)
-	client := redis.NewClient(&redis.Options{
-		Addr:        mr.Addr(),
-		DialTimeout: 200 * time.Millisecond,
-		MaxRetries:  -1,
-	})
-	t.Cleanup(func() { client.Close() })
-	h, _, calls := authHandler(t, client)
-	mr.Close()
+func TestAuthMiddlewareIgnoresTheCaseOfTheScheme(t *testing.T) {
+	key := newTestKey(t)
+	h, _, calls := authHandler(t, newP256Auth(t, key))
 
-	rec := authRequest(h, testKey)
+	rec := authRequest(h, "bearer "+signToken(t, jwt.SigningMethodES256, key, testKid, validClaims("billing-service")))
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if *calls != 0 {
-		t.Fatalf("next handler ran %d times, want 0", *calls)
+	if *calls != 1 {
+		t.Fatalf("next handler ran %d times, want 1", *calls)
 	}
 }
 
-func TestAuthMiddlewareAnswers503WhenRedisStopsResponding(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			t.Cleanup(func() { c.Close() })
-		}
-	}()
-	client := redis.NewClient(&redis.Options{
-		Addr:        ln.Addr().String(),
-		ReadTimeout: 100 * time.Millisecond,
-		MaxRetries:  -1,
-	})
-	t.Cleanup(func() { client.Close() })
-	h, _, calls := authHandler(t, client)
+func TestAuthMiddlewareDoesNotLookAtTheAPIKeyHeader(t *testing.T) {
+	key := newTestKey(t)
+	h, _, calls := authHandler(t, newP256Auth(t, key))
 
-	start := time.Now()
-	rec := authRequest(h, testKey)
+	req := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
+	req.Header.Set(AuthKeyHeader, testKey)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 	if *calls != 0 {
 		t.Fatalf("next handler ran %d times, want 0", *calls)
-	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("answered after %v, want the client read timeout to cut it short", elapsed)
 	}
 }
 
@@ -179,7 +252,7 @@ func newHeaderEchoUpstream(t *testing.T) (*httptest.Server, *http.Header) {
 	return srv, &seen
 }
 
-func TestProxyReplacesTheClientIdentityAndStripsTheKey(t *testing.T) {
+func TestProxyReplacesTheClientIdentityWithTheTokenSubject(t *testing.T) {
 	upstream, seen := newHeaderEchoUpstream(t)
 	table, err := buildRoutingTable([]config.RoutesConfig{
 		{Name: "auth", Prefix: "/auth", Location: upstream.URL},
@@ -187,11 +260,11 @@ func TestProxyReplacesTheClientIdentityAndStripsTheKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building routing table: %v", err)
 	}
-	mr := seededRedis(t)
-	h := (&AuthMiddleware{redis: newClient(t, mr.Addr())}).Process(&Handler{Routes: &table})
+	key := newTestKey(t)
+	h := newP256Auth(t, key).Process(&Handler{Routes: &table})
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
-	req.Header.Set(AuthKeyHeader, testKey)
+	req.Header.Set("Authorization", "Bearer "+signToken(t, jwt.SigningMethodES256, key, testKid, validClaims("billing-service")))
 	req.Header.Set("X-Client-Id", "admin")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -202,8 +275,8 @@ func TestProxyReplacesTheClientIdentityAndStripsTheKey(t *testing.T) {
 	if got := seen.Get("X-Client-Id"); got != "billing-service" {
 		t.Errorf("upstream X-Client-Id = %q, want %q", got, "billing-service")
 	}
-	if got := seen.Get(AuthKeyHeader); got != "" {
-		t.Errorf("upstream %s = %q, want it removed", AuthKeyHeader, got)
+	if got := seen.Get("Authorization"); got != "" {
+		t.Errorf("upstream Authorization = %q, want it removed", got)
 	}
 }
 

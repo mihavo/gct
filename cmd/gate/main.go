@@ -43,16 +43,14 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	startupCtx, cancelStartup := context.WithTimeout(ctx, 5*time.Second)
-	gateInstance, err := gate.NewGate(startupCtx, redisClient, *gateConfig)
-	cancelStartup()
+	notifyCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	gateInstance, err := gate.NewGate(notifyCtx, redisClient, *gateConfig)
 	if err != nil {
 		log.Fatalf("gate init failed: %v", err)
 	}
 	slog.Debug("Gate: ", "gate", gateInstance)
-
-	notifyCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	if err := serve.Run(notifyCtx, gateInstance.Server, shutdownTimeout); err != nil {
 		log.Fatalf("gate server: %v", err)

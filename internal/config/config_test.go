@@ -7,11 +7,12 @@ import (
 
 func TestGateConfigFilesCarryTheJWKSRefreshInterval(t *testing.T) {
 	tests := []struct {
-		path string
-		want int
+		path       string
+		want       int
+		wantIssuer string
 	}{
-		{filepath.Join("..", "..", "configs", "gate.yml"), 5},
-		{filepath.Join("..", "..", "examples", "compose", "gate.yml"), 1},
+		{filepath.Join("..", "..", "configs", "gate.yml"), 5, "http://localhost:9090"},
+		{filepath.Join("..", "..", "examples", "compose", "gate.yml"), 1, "http://issuer:9090"},
 	}
 
 	for _, tt := range tests {
@@ -22,6 +23,9 @@ func TestGateConfigFilesCarryTheJWKSRefreshInterval(t *testing.T) {
 			}
 			if got.JWKSRefreshIntervalMinutes != tt.want {
 				t.Fatalf("JWKSRefreshIntervalMinutes = %d, want %d", got.JWKSRefreshIntervalMinutes, tt.want)
+			}
+			if got.IssuerURL != tt.wantIssuer {
+				t.Fatalf("IssuerURL = %q, want %q", got.IssuerURL, tt.wantIssuer)
 			}
 			if got.Server.Port != 8080 || len(got.Routes) != 6 {
 				t.Fatalf("rest of the file did not load: port %d, %d routes", got.Server.Port, len(got.Routes))

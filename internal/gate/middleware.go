@@ -7,12 +7,13 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
+	"strings"
 	"time"
 	"uuid"
 
+	"github.com/MicahParks/keyfunc/v3"
+	"github.com/golang-jwt/jwt/v5"
 	appjson "github.com/mihavo/gct/internal/core/json"
-	"github.com/redis/go-redis/v9"
 )
 
 type Middleware interface {
@@ -30,7 +31,7 @@ type LimiterMiddleware struct {
 }
 
 type AuthMiddleware struct {
-	redis *redis.Client
+	keyfnc keyfunc.Keyfunc
 }
 
 func (l *LimiterMiddleware) Process(next http.Handler) http.Handler {
@@ -83,26 +84,26 @@ func (l *LoggingMiddleware) Process(next http.Handler) http.Handler {
 
 func (a *AuthMiddleware) Process(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get(AuthKeyHeader)
-		if key == "" {
-			appjson.WriteError(w, "no api key present", http.StatusUnauthorized)
+		scheme, token, found := strings.Cut(r.Header.Get("Authorization"), " ")
+		if !found || !strings.EqualFold(scheme, "Bearer") || token == "" {
+			appjson.WriteError(w, "no auth token present", http.StatusUnauthorized)
 			return
 		}
-		hash := GenerateKeyHash(key)
-		client, err := a.redis.Get(r.Context(), AuthKeyPrefix+hash).Result()
+		parsed, err := jwt.Parse(token, a.keyfnc.Keyfunc, jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}), jwt.WithExpirationRequired())
 		if err != nil {
-			if errors.Is(err, redis.Nil) {
-				appjson.WriteError(w, "invalid api key", http.StatusUnauthorized)
-			} else if errors.Is(err, os.ErrDeadlineExceeded) {
-				slog.Error("redis auth deadline exceeded", "error", err)
-				appjson.WriteError(w, "internal server error", http.StatusServiceUnavailable)
-			} else if errors.Is(err, context.DeadlineExceeded) {
-				slog.Error("redis connection timeout", "error", err)
-				appjson.WriteError(w, "internal server error", http.StatusServiceUnavailable)
-			} else {
-				slog.Error("redis auth error", "error", err)
-				appjson.WriteError(w, "internal server error", http.StatusInternalServerError)
-			}
+			slog.Debug("request denied, token rejected", "error", err, "method", r.Method, "path", r.URL.Path)
+			appjson.WriteError(w, "invalid auth token", http.StatusUnauthorized)
+			return
+		}
+		client, err := parsed.Claims.GetSubject()
+		if err != nil {
+			slog.Warn("request denied, signed token has no usable subject", "error", err, "method", r.Method, "path", r.URL.Path)
+			appjson.WriteError(w, "invalid auth token", http.StatusUnauthorized)
+			return
+		}
+		if client == "" {
+			slog.Warn("request denied, signed token has no subject", "method", r.Method, "path", r.URL.Path)
+			appjson.WriteError(w, "invalid auth token", http.StatusUnauthorized)
 			return
 		}
 		slog.Debug("client authenticated", "client", client)

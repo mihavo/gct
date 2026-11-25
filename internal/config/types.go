@@ -6,6 +6,7 @@ type GateConfig struct {
 	Server                     ServerConfig   `yaml:"server"`
 	Limiter                    LimiterConfig  `yaml:"limiter"`
 	JWKSRefreshIntervalMinutes int            `yaml:"jwks_refresh_interval_minutes"`
+	IssuerURL                  string         `yaml:"issuer_url"`
 	Routes                     []RoutesConfig `yaml:"routes"`
 }
 
