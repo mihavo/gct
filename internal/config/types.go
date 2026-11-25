@@ -3,13 +3,15 @@ package config
 import "time"
 
 type GateConfig struct {
-	Server  ServerConfig   `yaml:"server"`
-	Limiter LimiterConfig  `yaml:"limiter"`
-	Routes  []RoutesConfig `yaml:"routes"`
+	Server                     ServerConfig   `yaml:"server"`
+	Limiter                    LimiterConfig  `yaml:"limiter"`
+	JWKSRefreshIntervalMinutes int            `yaml:"jwks_refresh_interval_minutes"`
+	Routes                     []RoutesConfig `yaml:"routes"`
 }
 
 type IssuerConfig struct {
-	Server ServerConfig `yaml:"server"`
+	Server                      ServerConfig `yaml:"server"`
+	TokenExpirationDelayMinutes int          `yaml:"token_expiration_delay_minutes"`
 }
 
 type ServerConfig struct {

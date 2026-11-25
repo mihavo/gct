@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -24,8 +25,9 @@ const (
 )
 
 type Key struct {
-	Kid string
-	Key *ecdsa.PrivateKey
+	Kid          string
+	Key          *ecdsa.PrivateKey
+	LastModified time.Time
 }
 
 func KeyID(pub *ecdsa.PublicKey) (string, error) {
@@ -152,8 +154,11 @@ func Load(dir string) ([]Key, error) {
 			if kid != strings.TrimSuffix(file.Name(), keyFileExt) {
 				return []Key{}, fmt.Errorf("%s: file name does not match the key's kid %s", file.Name(), kid)
 			}
-
-			keys = append(keys, Key{Kid: kid, Key: key})
+			info, err := file.Info()
+			if err != nil {
+				return []Key{}, fmt.Errorf("%s: file info could not be loaded: %w", file.Name(), err)
+			}
+			keys = append(keys, Key{Kid: kid, Key: key, LastModified: info.ModTime()})
 		}
 	}
 

@@ -30,7 +30,7 @@ func TestNewIssuerConfig(t *testing.T) {
 	t.Cleanup(func() { client.Close() })
 
 	keys := testKeys(t)
-	valid := config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 9090}}
+	valid := config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 9090}, TokenExpirationDelayMinutes: 60}
 
 	tests := []struct {
 		name    string
@@ -43,13 +43,16 @@ func TestNewIssuerConfig(t *testing.T) {
 		{"nil redis", nil, valid, keys, true},
 		{"nil keys", client, valid, nil, true},
 		{"empty keys", client, valid, []keystore.Key{}, true},
-		{"empty listen address", client, config.IssuerConfig{Server: config.ServerConfig{Port: 9090}}, keys, true},
+		{"empty listen address", client, config.IssuerConfig{Server: config.ServerConfig{Port: 9090}, TokenExpirationDelayMinutes: 60}, keys, true},
 		{"zero value config", client, config.IssuerConfig{}, keys, true},
-		{"port zero", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost"}}, keys, true},
-		{"negative port", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: -1}}, keys, true},
-		{"port above range", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 65536}}, keys, true},
-		{"lowest port", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 1}}, keys, false},
-		{"highest port", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 65535}}, keys, false},
+		{"no delay", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 9090}}, keys, true},
+		{"negative delay", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 9090}, TokenExpirationDelayMinutes: -5}, keys, true},
+		{"smallest delay", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 9090}, TokenExpirationDelayMinutes: 1}, keys, false},
+		{"port zero", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost"}, TokenExpirationDelayMinutes: 60}, keys, true},
+		{"negative port", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: -1}, TokenExpirationDelayMinutes: 60}, keys, true},
+		{"port above range", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 65536}, TokenExpirationDelayMinutes: 60}, keys, true},
+		{"lowest port", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 1}, TokenExpirationDelayMinutes: 60}, keys, false},
+		{"highest port", client, config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 65535}, TokenExpirationDelayMinutes: 60}, keys, false},
 	}
 
 	for _, tt := range tests {
@@ -73,7 +76,7 @@ func TestNewIssuerKeepsKeys(t *testing.T) {
 	t.Cleanup(func() { client.Close() })
 
 	keys := testKeys(t)
-	cfg := config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 9090}}
+	cfg := config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "localhost", Port: 9090}, TokenExpirationDelayMinutes: 60}
 
 	got, err := NewIssuer(context.Background(), client, cfg, keys)
 	if err != nil {
@@ -88,7 +91,7 @@ func TestNewIssuerAddr(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: "localhost:0"})
 	t.Cleanup(func() { client.Close() })
 
-	cfg := config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "0.0.0.0", Port: 9090}}
+	cfg := config.IssuerConfig{Server: config.ServerConfig{ListenAddress: "0.0.0.0", Port: 9090}, TokenExpirationDelayMinutes: 60}
 	got, err := NewIssuer(context.Background(), client, cfg, testKeys(t))
 	if err != nil {
 		t.Fatalf("NewIssuer() unexpected error: %v", err)

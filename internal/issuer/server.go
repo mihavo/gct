@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/mihavo/gct/internal/config"
 	"github.com/mihavo/gct/internal/keystore"
@@ -34,13 +35,17 @@ func NewIssuer(ctx context.Context, redis *redis.Client, config config.IssuerCon
 		return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", config.Server.Port)
 	}
 
+	if config.TokenExpirationDelayMinutes < 1 {
+		return nil, fmt.Errorf("invalid token expiration delay %d: must be at least 1 minute", config.TokenExpirationDelayMinutes)
+	}
+
 	if len(keys) == 0 {
 		return nil, errors.New("no keys present for issuer")
 	}
 
 	server := &http.Server{
 		Addr:    net.JoinHostPort(config.Server.ListenAddress, strconv.Itoa(config.Server.Port)),
-		Handler: NewHandler(redis, keys).Routes(),
+		Handler: NewHandler(redis, keys, time.Duration(config.TokenExpirationDelayMinutes)*time.Minute).Routes(),
 	}
 
 	return &Issuer{

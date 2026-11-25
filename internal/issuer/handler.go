@@ -2,10 +2,13 @@ package issuer
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -16,12 +19,22 @@ import (
 )
 
 type Handler struct {
-	redis *redis.Client
-	keys  []keystore.Key
+	redis                *redis.Client
+	keys                 []keystore.Key
+	TokenExpirationDelay time.Duration
+	mux                  sync.RWMutex
 }
 
-func NewHandler(redisClient *redis.Client, keys []keystore.Key) *Handler {
-	return &Handler{redis: redisClient, keys: keys}
+type JWK struct {
+	Kty string `json:"kty"`
+	Crv string `json:"crv"`
+	X   string `json:"x"`
+	Y   string `json:"y"`
+	Kid string `json:"kid"`
+}
+
+func NewHandler(redisClient *redis.Client, keys []keystore.Key, tokenExpirationDelay time.Duration) *Handler {
+	return &Handler{redis: redisClient, keys: slices.Clone(keys), TokenExpirationDelay: tokenExpirationDelay}
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -63,7 +76,32 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(TokenExpirationInterval)),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	key := h.keys[len(h.keys)-1]
+	var key keystore.Key
+
+	h.mux.Lock()
+	now := time.Now()
+	usable := make([]keystore.Key, 0, len(h.keys))
+	for _, candidate := range h.keys {
+		if candidate.LastModified.Add(h.TokenExpirationDelay).Before(now) {
+			usable = append(usable, candidate)
+		}
+	}
+	if len(usable) == 0 {
+		key = slices.MinFunc(h.keys, func(a, b keystore.Key) int {
+			return a.LastModified.Compare(b.LastModified)
+		})
+	} else {
+		key = slices.MaxFunc(usable, func(a, b keystore.Key) int {
+			return a.LastModified.Compare(b.LastModified)
+		})
+		if len(usable) > 1 && key.LastModified.Add(h.TokenExpirationDelay).Add(TokenExpirationInterval).Add(KeyRemovalErrorMargin).Before(now) {
+			h.keys = slices.DeleteFunc(h.keys, func(candidate keystore.Key) bool {
+				return candidate.Kid != key.Kid && candidate.LastModified.Add(h.TokenExpirationDelay).Before(now)
+			})
+		}
+	}
+	h.mux.Unlock()
+
 	token.Header["kid"] = key.Kid
 	signed, err := token.SignedString(key.Key)
 
@@ -85,5 +123,29 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) jwks(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	h.mux.RLock()
+	pubs := make([]JWK, 0, len(h.keys))
+
+	for _, key := range h.keys {
+		point, err := key.Key.PublicKey.Bytes()
+		if err != nil {
+			slog.Error("could not encode public key", "kid", key.Kid, "error", err)
+			appjson.WriteError(w, "internal server error", http.StatusInternalServerError)
+			h.mux.RUnlock()
+			return
+		}
+		size := (key.Key.Curve.Params().BitSize + 7) / 8
+		jwk := JWK{
+			Kty: "EC",
+			Crv: key.Key.Curve.Params().Name,
+			X:   base64.RawURLEncoding.EncodeToString(point[1 : 1+size]),
+			Y:   base64.RawURLEncoding.EncodeToString(point[1+size:]),
+			Kid: key.Kid,
+		}
+		pubs = append(pubs, jwk)
+	}
+	h.mux.RUnlock()
+	appjson.Write(w, http.StatusOK, map[string]any{
+		"keys": pubs,
+	})
 }

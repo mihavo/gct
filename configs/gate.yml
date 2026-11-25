@@ -9,6 +9,8 @@ limiter:
     tokens: 1
     per: 1s
 
+jwks_refresh_interval_minutes: 5
+
 routes:
   - name: "users"
     prefix: "/users"

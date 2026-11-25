@@ -77,7 +77,7 @@ func parseToken(t *testing.T, raw string, key keystore.Key) (*jwt.Token, *jwt.Re
 func TestTokenIssuesASignedTokenForAValidKey(t *testing.T) {
 	mr := seededRedis(t)
 	keys := testKeys(t)
-	h := NewHandler(redisClient(t, mr.Addr()), keys).Routes()
+	h := NewHandler(redisClient(t, mr.Addr()), keys, testDelay).Routes()
 
 	rec := postToken(h, testAPIKey)
 
@@ -127,7 +127,7 @@ func TestTokenDoesNotVerifyWithAnotherKey(t *testing.T) {
 	mr := seededRedis(t)
 	keys := testKeys(t)
 	other := testKeys(t)
-	h := NewHandler(redisClient(t, mr.Addr()), keys).Routes()
+	h := NewHandler(redisClient(t, mr.Addr()), keys, testDelay).Routes()
 
 	rec := postToken(h, testAPIKey)
 	var body struct {
@@ -144,7 +144,7 @@ func TestTokenDoesNotVerifyWithAnotherKey(t *testing.T) {
 
 func TestTokenRejectsARequestWithoutAKey(t *testing.T) {
 	mr := seededRedis(t)
-	h := NewHandler(redisClient(t, mr.Addr()), testKeys(t)).Routes()
+	h := NewHandler(redisClient(t, mr.Addr()), testKeys(t), testDelay).Routes()
 
 	rec := postToken(h, "")
 
@@ -158,7 +158,7 @@ func TestTokenRejectsARequestWithoutAKey(t *testing.T) {
 
 func TestTokenRejectsAnUnknownKey(t *testing.T) {
 	mr := seededRedis(t)
-	h := NewHandler(redisClient(t, mr.Addr()), testKeys(t)).Routes()
+	h := NewHandler(redisClient(t, mr.Addr()), testKeys(t), testDelay).Routes()
 
 	rec := postToken(h, "not-a-real-key")
 
@@ -173,7 +173,7 @@ func TestTokenRejectsAnUnknownKey(t *testing.T) {
 
 func TestTokenDoesNotAcceptTheStoredHashAsAKey(t *testing.T) {
 	mr := seededRedis(t)
-	h := NewHandler(redisClient(t, mr.Addr()), testKeys(t)).Routes()
+	h := NewHandler(redisClient(t, mr.Addr()), testKeys(t), testDelay).Routes()
 
 	rec := postToken(h, gate.GenerateKeyHash(testAPIKey))
 
@@ -191,7 +191,7 @@ func TestTokenFailsClosedWhenRedisIsDown(t *testing.T) {
 		MaxRetries:  -1,
 	})
 	t.Cleanup(func() { client.Close() })
-	h := NewHandler(client, testKeys(t)).Routes()
+	h := NewHandler(client, testKeys(t), testDelay).Routes()
 	mr.Close()
 
 	rec := postToken(h, testAPIKey)
@@ -223,7 +223,7 @@ func TestTokenAnswers503WhenRedisStopsResponding(t *testing.T) {
 		MaxRetries:  -1,
 	})
 	t.Cleanup(func() { client.Close() })
-	h := NewHandler(client, testKeys(t)).Routes()
+	h := NewHandler(client, testKeys(t), testDelay).Routes()
 
 	start := time.Now()
 	rec := postToken(h, testAPIKey)
@@ -239,7 +239,7 @@ func TestTokenAnswers503WhenRedisStopsResponding(t *testing.T) {
 
 func TestTokenOnlyAcceptsPost(t *testing.T) {
 	mr := seededRedis(t)
-	h := NewHandler(redisClient(t, mr.Addr()), testKeys(t)).Routes()
+	h := NewHandler(redisClient(t, mr.Addr()), testKeys(t), testDelay).Routes()
 
 	req := httptest.NewRequest(http.MethodGet, "/token", nil)
 	req.Header.Set(gate.AuthKeyHeader, testAPIKey)
